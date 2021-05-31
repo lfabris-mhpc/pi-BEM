@@ -24,7 +24,6 @@
 #ifndef bem_fma_h
 #define bem_fma_h
 
-#include <deal.II/base/std_cxx11/bind.h>
 #include <deal.II/base/types.h>
 #include <deal.II/base/work_stream.h>
 

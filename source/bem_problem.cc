@@ -455,7 +455,7 @@ BEMProblem<dim>::parse_parameters(ParameterHandler &prm)
 
   prm.enter_subsection("Quadrature rules");
   {
-    quadrature = std_cxx1x::shared_ptr<Quadrature<dim - 1>>(
+    quadrature = std::shared_ptr<Quadrature<dim - 1>>(
       new QuadratureSelector<dim - 1>(prm.get("Quadrature type"),
                                       prm.get_integer("Quadrature order")));
     quadrature_order          = prm.get_integer("Quadrature order");
@@ -1394,8 +1394,7 @@ BEMProblem<dim>::solve_system(TrilinosWrappers::MPI::Vector &      phi,
         }
     }
   phi(this_cpu_set.nth_index_in_set(0)) = phi(this_cpu_set.nth_index_in_set(0));
-  dphi_dn(this_cpu_set.nth_index_in_set(0)) =
-    dphi_dn(this_cpu_set.nth_index_in_set(0));
+  dphi_dn(this_cpu_set.nth_index_in_set(0)) = dphi_dn(this_cpu_set.nth_index_in_set(0));
   phi.compress(VectorOperation::insert);
   dphi_dn.compress(VectorOperation::insert);
 

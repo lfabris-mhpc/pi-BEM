@@ -24,7 +24,6 @@
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/quadrature_selector.h>
 #include <deal.II/base/smartpointer.h>
-#include <deal.II/base/std_cxx11/tuple.h>
 #include <deal.II/base/utilities.h>
 
 #include <deal.II/grid/grid_generator.h>
