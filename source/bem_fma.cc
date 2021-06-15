@@ -4277,7 +4277,7 @@ BEMFMA<dim>::generate_octree_blocking()
                            it != blockQuadPointsList.end();
                            it++)
                         {
-                          cell_it cell = (*it).first;
+                          // cell_it cell = (*it).first;
                           for (types::global_dof_index kk = 0;
                                kk < (*it).second.size();
                                kk++)
@@ -4407,7 +4407,7 @@ BEMFMA<dim>::generate_octree_blocking()
                            it != blockQuadPointsList.end();
                            it++)
                         {
-                          cell_it cell = (*it).first;
+                          // cell_it cell = (*it).first;
                           for (types::global_dof_index kk = 0;
                                kk < (*it).second.size();
                                kk++)
