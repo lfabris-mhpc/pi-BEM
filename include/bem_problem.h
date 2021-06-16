@@ -70,8 +70,6 @@
 #include <deal.II/numerics/solution_transfer.h>
 #include <deal.II/numerics/vector_tools.h>
 
-// And here are a few C++ standard header
-// files that we will need:
 #include <deal2lkit/parameter_acceptor.h>
 #include <deal2lkit/parsed_finite_element.h>
 #include <deal2lkit/parsed_grid_refinement.h>
