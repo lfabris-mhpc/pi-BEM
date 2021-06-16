@@ -102,7 +102,6 @@ public:
     dofs_number = 0, output_frequency = 1;
   }
 
-
   typedef typename DoFHandler<dim - 1, dim>::active_cell_iterator cell_it;
 
   virtual void
@@ -249,8 +248,6 @@ protected:
 
   unsigned int n_components;
   unsigned int current_component;
-  // Functions::ParsedFunction<dim> wind;
-  // Functions::ParsedFunction<dim> potential;
   std::vector<std::unique_ptr<Functions::ParsedFunction<dim>>> winds;
   std::vector<std::unique_ptr<Functions::ParsedFunction<dim>>> potentials;
 
@@ -266,9 +263,7 @@ protected:
 
   unsigned int output_frequency;
 
-  TrilinosWrappers::MPI::Vector tmp_rhs;
-  // TrilinosWrappers::MPI::Vector phi;
-  // TrilinosWrappers::MPI::Vector dphi_dn;
+  TrilinosWrappers::MPI::Vector              tmp_rhs;
   std::vector<TrilinosWrappers::MPI::Vector> phis;
   std::vector<TrilinosWrappers::MPI::Vector> dphi_dns;
 
