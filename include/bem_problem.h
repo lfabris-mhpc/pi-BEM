@@ -362,7 +362,6 @@ public:
   unsigned int                      mapping_degree;
   Vector<double>                    map_points;
 
-
   /// these are the std::vectors of std::sets
   /// containing informations on multiple
   /// nodes on the edges: one vector is
