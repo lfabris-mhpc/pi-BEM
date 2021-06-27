@@ -4,9 +4,9 @@
 // have been discussed in previous tutorials
 // already:
 
-#include <deal.II/grid/filtered_iterator.h>
-
 #include "../include/boundary_conditions.h"
+
+#include <deal.II/grid/filtered_iterator.h>
 
 template <int dim, class DH = DoFHandler<dim, dim + 1>>
 class FilteredDataOut : public DataOut<dim, DH>

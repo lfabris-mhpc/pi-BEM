@@ -1,9 +1,9 @@
+#include "../include/computational_domain.h"
+
 #include <deal.II/grid/grid_reordering.h>
 #include <deal.II/grid/grid_tools.h>
 
 #include <deal2lkit/utilities.h>
-
-#include "../include/computational_domain.h"
 
 // @sect4{ComputationalDomain::ComputationalDomain and
 // ComputationalDomain::read_parameters}
