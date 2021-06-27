@@ -67,6 +67,8 @@ FIND_PACKAGE(deal2lkit 1.0 REQUIRED
   )
 D2K_INITIALIZE_CACHED_VARIABLES()
 
+FIND_PACKAGE(OpenMP REQUIRED)
+
 # We one library and one target for each type of deal.II library
 # we found. If you compiled deal.II with both Release and Debug
 # mode, this will generate both Release and Debug programs for you
@@ -97,7 +99,7 @@ FOREACH(_build_type ${_d2_build_types})
 		MESSAGE("-- Configuring executable ${_exe}")
 		ADD_EXECUTABLE(${_exe} ${_main})
 		target_compile_definitions(${_exe} PUBLIC DEAL_II_DIMENSION=${_dim})
-		TARGET_LINK_LIBRARIES(${_exe} ${_lib})
+		TARGET_LINK_LIBRARIES(${_exe} ${_lib} OpenMP::OpenMP_CXX)
 		D2K_SETUP_TARGET(${_exe} ${_BUILD_TYPE})
     	ENDFOREACH()
 
