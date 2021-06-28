@@ -68,6 +68,10 @@ FIND_PACKAGE(deal2lkit 1.0 REQUIRED
 D2K_INITIALIZE_CACHED_VARIABLES()
 
 FIND_PACKAGE(OpenMP REQUIRED)
+#-fopenmp was not used in compiling .o files, it was substituted with -fopenmp-simd
+IF (OPENMP_FOUND)
+    add_definitions("-fopenmp")
+ENDIF()
 
 # We one library and one target for each type of deal.II library
 # we found. If you compiled deal.II with both Release and Debug
@@ -98,10 +102,13 @@ FOREACH(_build_type ${_d2_build_types})
 		SET(_exe "${TARGET}_${_dim}d${${_build_type}_postfix}")
 		MESSAGE("-- Configuring executable ${_exe}")
 		ADD_EXECUTABLE(${_exe} ${_main})
-		target_compile_definitions(${_exe} PUBLIC DEAL_II_DIMENSION=${_dim})
+		
+		message("OpenMP_CXX_FLAGS: ${OpenMP_CXX_FLAGS}")
+		
 		TARGET_LINK_LIBRARIES(${_exe} ${_lib} OpenMP::OpenMP_CXX)
+		target_compile_definitions(${_exe} PUBLIC DEAL_II_DIMENSION=${_dim} )
 		D2K_SETUP_TARGET(${_exe} ${_BUILD_TYPE})
-    	ENDFOREACH()
+	ENDFOREACH()
 
 	# Compile an executable only if required by the user
 	#IF(NOT "${_main}" STREQUAL "")
