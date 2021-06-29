@@ -67,7 +67,12 @@ FIND_PACKAGE(deal2lkit 1.0 REQUIRED
   )
 D2K_INITIALIZE_CACHED_VARIABLES()
 
-FIND_PACKAGE(OpenMP REQUIRED)
+IF($ENV{PBEM_OPENMP})
+    message("compiling with OpenMP threading")
+    FIND_PACKAGE(OpenMP REQUIRED)
+ELSE()
+    message("compiling with TBB threading")
+ENDIF()
 #-fopenmp was not used in compiling .o files, it was substituted with -fopenmp-simd
 IF (OPENMP_FOUND)
     add_definitions("-fopenmp")
