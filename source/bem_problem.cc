@@ -1,10 +1,9 @@
-#include "../include/bem_problem.h"
-
 #include <deal.II/numerics/error_estimator.h>
 
 #include <iomanip>
 #include <iostream>
 
+#include "../include/bem_problem.h"
 #include "../include/laplace_kernel.h"
 #include "Teuchos_TimeMonitor.hpp"
 
@@ -435,7 +434,7 @@ BEMProblem<dim>::compute_dirichlet_and_neumann_dofs_vectors()
         {
           for (auto dummy : comp_dom.dirichlet_boundary_ids)
             {
-              if (dummy == cell->material_id())
+              if (dummy == cell->boundary_id())
                 {
                   cell->get_dof_indices(dofs);
                   for (auto i : dofs)
