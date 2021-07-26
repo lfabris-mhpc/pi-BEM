@@ -112,6 +112,9 @@ ComputationalDomain<dim>::declare_parameters(ParameterHandler &prm)
     prm.declare_entry("Neumann boundary ids",
                       "0,110,110",
                       Patterns::List(Patterns::Integer(0)));
+    prm.declare_entry("Robin boundary ids",
+                      "2,110,110",
+                      Patterns::List(Patterns::Integer(0)));
     prm.declare_entry(
       "Manifold to boundary map",
       "0,0,1,1",
@@ -183,6 +186,16 @@ ComputationalDomain<dim>::parse_parameters(ParameterHandler &prm)
         reader >> neumann_boundary_ids[i];
         manifold2boundary_map[neumann_boundary_ids[i]] =
           neumann_boundary_ids[i];
+      }
+
+    std::vector<std::string> robin_string_list =
+      Utilities::split_string_list(prm.get("Robin boundary ids"));
+    robin_boundary_ids.resize(robin_string_list.size());
+    for (unsigned int i = 0; i < robin_string_list.size(); ++i)
+      {
+        std::istringstream reader(robin_string_list[i]);
+        reader >> robin_boundary_ids[i];
+        manifold2boundary_map[robin_boundary_ids[i]] = robin_boundary_ids[i];
       }
 
     std::vector<std::string> manifold2boundary_list =
@@ -291,6 +304,16 @@ ComputationalDomain<dim>::read_domain()
       Assert(false, ExcNotImplemented());
     }
 
+  if (input_grid_name == "../grids/coarse_sphere" ||
+      input_grid_name == "../grids/coarse_sphere_double_nodes" ||
+      input_grid_name == "../grids/circle")
+    {
+      manifold = new SphericalManifold<dim - 1, dim>;
+      tria.set_all_manifold_ids(0);
+      tria.set_manifold(0, *manifold);
+      used_spherical_manifold = true;
+    }
+
   // TODO: use manifold2boundary to traverse the mesh and set the proper values
   for (auto &cell : tria.active_cell_iterators())
     {
@@ -298,6 +321,8 @@ ComputationalDomain<dim>::read_domain()
       if (cell->material_id() && !cell->manifold_id())
         {
           cell->set_manifold_id(cell->material_id());
+          // pcout << "setting manifold " << cell->manifold_id()
+          //       << " from material " << cell->material_id() << std::endl;
         }
 
       // once manifold id are applied correctly
@@ -307,16 +332,6 @@ ComputationalDomain<dim>::read_domain()
           // cell->set_all_boundary_ids(iter->second);
           cell->set_boundary_id(iter->second);
         }
-    }
-
-  if (input_grid_name == "../grids/coarse_sphere" ||
-      input_grid_name == "../grids/coarse_sphere_double_nodes" ||
-      input_grid_name == "../grids/circle")
-    {
-      manifold = new SphericalManifold<dim - 1, dim>;
-      tria.set_all_manifold_ids(0);
-      tria.set_manifold(0, *manifold);
-      used_spherical_manifold = true;
     }
 }
 
@@ -800,6 +815,13 @@ ComputationalDomain<dim>::refine_and_resize(const unsigned int refinement_level)
               Point<3> n = (nn0 + nn1 + nn2 + nn3) / 4.0;
               n /= n.norm();
 
+              // pcout
+              //   << "surface_curvature_refinement - about to compute cell size
+              //   (from manifold "
+              //   << cell->manifold_id() << ")" << std::endl;
+              // pcout << "surface_curvature_refinement - cad surfaces available
+              // "
+              //       << cad_surfaces.size() << std::endl;
               // once the cell normal has beed created, we want to use it as the
               // direction of the projection onto the CAD surface
               // first though, let's check that we are using a CAD surface for
@@ -815,6 +837,9 @@ ComputationalDomain<dim>::refine_and_resize(const unsigned int refinement_level)
                   TopoDS_Shape neededShape =
                     cad_surfaces[cell->manifold_id() - 1];
 
+                  // pcout << "surface_curvature_refinement - gotten cad
+                  // surface"
+                  //       << std::endl;
                   // pcout << "Refining from manifold " << cell->manifold_id()
                   //       << std::endl;
 
@@ -823,10 +848,18 @@ ComputationalDomain<dim>::refine_and_resize(const unsigned int refinement_level)
                   // specified by the previously computed cell normal
                   Point<3> projection = OpenCASCADE::line_intersection(
                     neededShape, cell->center(), n, tolerance);
+                  // pcout
+                  //   << "surface_curvature_refinement - gotten
+                  //   line_intersection "
+                  //   << projection << std::endl;
                   // in correspondence with the projected point, we ask all the
                   // surface differential forms
                   auto tup = OpenCASCADE::closest_point_and_differential_forms(
                     neededShape, projection, tolerance);
+                  // pcout
+                  //   << "surface_curvature_refinement - gotten
+                  //   closest_point_and_differential_forms"
+                  //   << std::endl;
                   // among the differential point, we select the maximum
                   // absolute curvature
                   double max_abs_curv =
@@ -836,6 +869,10 @@ ComputationalDomain<dim>::refine_and_resize(const unsigned int refinement_level)
                   // "<<std::get<2>(tup)<<"  Kmax:
                   // "<<std::get<3>(tup)<<endl; the minimum curvature
                   // radius is computed from the maximum absolute curvatur
+                  // pcout
+                  //   << "surface_curvature_refinement - curvature radius 1.0 /
+                  //   "
+                  //   << fmax(max_abs_curv, tolerance) << std::endl;
                   double curvature_radius = 1.0 / fmax(max_abs_curv, tolerance);
                   // the target cell size is selected so that it corresponds to
                   // a cells_per_circle fraction of the circumference
@@ -853,6 +890,8 @@ ComputationalDomain<dim>::refine_and_resize(const unsigned int refinement_level)
                   // that the cell is never refined
                   cell_size =
                     2 * dealii::numbers::PI / cells_per_circle / tolerance;
+
+                  // pcout << "cell rejected for refinement" << std::endl;
                 }
 
               // the following line si for debug puropses and should be

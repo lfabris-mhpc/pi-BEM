@@ -384,6 +384,10 @@ public:
   TrilinosWrappers::SparsityPattern full_sparsity_pattern;
   TrilinosWrappers::SparseMatrix    neumann_matrix;
   TrilinosWrappers::SparseMatrix    dirichlet_matrix;
+  // handles robin conditions such as
+  // coeffs[i, 0] * phi + coeffs[i, 1] * dphi_dn = coeffs[i, 2]
+  TrilinosWrappers::MPI::Vector robin_matrix_diagonal;
+  TrilinosWrappers::MPI::Vector robin_rhs;
 
   TrilinosWrappers::MPI::Vector system_rhs;
 
@@ -392,6 +396,7 @@ public:
 
   mutable TrilinosWrappers::MPI::Vector serv_phi;
   mutable TrilinosWrappers::MPI::Vector serv_dphi_dn;
+  mutable TrilinosWrappers::MPI::Vector serv_phi_robin;
   TrilinosWrappers::MPI::Vector         serv_tmp_rhs;
 
   AffineConstraints<double> constraints;
@@ -426,6 +431,7 @@ public:
   /// entries for Dirichlet nodes, and ones
   /// for Neumann nodes
   TrilinosWrappers::MPI::Vector neumann_nodes;
+  TrilinosWrappers::MPI::Vector robin_nodes;
 
   /// The IndexSet for the problem without considering any ghost element for the
   /// scalar FE
