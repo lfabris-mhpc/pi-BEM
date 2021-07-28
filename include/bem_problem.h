@@ -120,6 +120,15 @@ public:
         const TrilinosWrappers::MPI::Vector &tmp_rhs,
         bool                                 reset_matrix = true);
 
+  void
+  solve(TrilinosWrappers::MPI::Vector &      phi,
+        TrilinosWrappers::MPI::Vector &      phi_imag,
+        TrilinosWrappers::MPI::Vector &      dphi_dn,
+        TrilinosWrappers::MPI::Vector &      dphi_dn_imag,
+        const TrilinosWrappers::MPI::Vector &tmp_rhs,
+        const TrilinosWrappers::MPI::Vector &tmp_rhs_imag,
+        bool                                 reset_matrix = true);
+
   /// This function takes care of the proper initialization of all the elements
   /// needed by the bem problem class. Since we need to sum elements associated
   /// with scalar and vectorial Finite Element spaces we have chosen to renumber
@@ -159,7 +168,6 @@ public:
   virtual void
   parse_parameters(ParameterHandler &prm);
 
-
   /// This function computes the fraction of solid angles seen by our domain. We
   /// use the Double Layer Operator (through the Neumann matrix) to determine
   /// it.
@@ -186,12 +194,24 @@ public:
   vmult(TrilinosWrappers::MPI::Vector &      dst,
         const TrilinosWrappers::MPI::Vector &src) const;
 
+  void
+  vmult(TrilinosWrappers::MPI::Vector &      dst,
+        TrilinosWrappers::MPI::Vector &      dst_imag,
+        const TrilinosWrappers::MPI::Vector &src,
+        const TrilinosWrappers::MPI::Vector &src_imag) const;
+
   /// The second method computes the
   /// right hand side vector of the
   /// system.
   void
   compute_rhs(TrilinosWrappers::MPI::Vector &      dst,
               const TrilinosWrappers::MPI::Vector &src) const;
+
+  void
+  compute_rhs(TrilinosWrappers::MPI::Vector &      dst,
+              TrilinosWrappers::MPI::Vector &      dst_imag,
+              const TrilinosWrappers::MPI::Vector &src,
+              const TrilinosWrappers::MPI::Vector &src_imag) const;
 
   /// The third method computes the
   /// product between the solution vector
@@ -210,6 +230,13 @@ public:
   solve_system(TrilinosWrappers::MPI::Vector &      phi,
                TrilinosWrappers::MPI::Vector &      dphi_dn,
                const TrilinosWrappers::MPI::Vector &tmp_rhs);
+  void
+  solve_system(TrilinosWrappers::MPI::Vector &      phi,
+               TrilinosWrappers::MPI::Vector &      phi_imag,
+               TrilinosWrappers::MPI::Vector &      dphi_dn,
+               TrilinosWrappers::MPI::Vector &      dphi_dn_imag,
+               const TrilinosWrappers::MPI::Vector &tmp_rhs,
+               const TrilinosWrappers::MPI::Vector &tmp_rhs_imag);
 
 
   void
@@ -280,7 +307,6 @@ public:
       {
         vector_gradients_solutions.resize(n_components);
         vector_surface_gradients_solutions.resize(n_components);
-        vector_normals_solutions.resize(n_components);
 
         this->n_components = n_components;
       }
@@ -312,12 +338,6 @@ public:
     return vector_surface_gradients_solutions[current_component];
   }
 
-  TrilinosWrappers::MPI::Vector &
-  get_vector_normals_solution()
-  {
-    return vector_normals_solutions[current_component];
-  }
-
   // component selection
   TrilinosWrappers::MPI::Vector &
   get_vector_gradients_solution(unsigned int component)
@@ -331,13 +351,6 @@ public:
   {
     assert(component < n_components);
     return vector_surface_gradients_solutions[component];
-  }
-
-  TrilinosWrappers::MPI::Vector &
-  get_vector_normals_solution(unsigned int component)
-  {
-    assert(component < n_components);
-    return vector_normals_solutions[component];
   }
 
   unsigned int              n_components;
@@ -386,20 +399,21 @@ public:
   TrilinosWrappers::SparseMatrix    dirichlet_matrix;
   // handles robin conditions such as
   // coeffs[i, 0] * phi + coeffs[i, 1] * dphi_dn = coeffs[i, 2]
-  TrilinosWrappers::MPI::Vector robin_matrix_diagonal;
-  TrilinosWrappers::MPI::Vector robin_rhs;
+  TrilinosWrappers::MPI::Vector robin_matrix_diagonal,
+    robin_matrix_diagonal_imag;
+  TrilinosWrappers::MPI::Vector robin_rhs, robin_rhs_imag;
 
-  TrilinosWrappers::MPI::Vector system_rhs;
+  TrilinosWrappers::MPI::Vector system_rhs, system_rhs_imag;
 
-  TrilinosWrappers::MPI::Vector sol;
+  TrilinosWrappers::MPI::Vector sol, sol_imag;
   TrilinosWrappers::MPI::Vector alpha;
 
-  mutable TrilinosWrappers::MPI::Vector serv_phi;
-  mutable TrilinosWrappers::MPI::Vector serv_dphi_dn;
-  mutable TrilinosWrappers::MPI::Vector serv_phi_robin;
-  TrilinosWrappers::MPI::Vector         serv_tmp_rhs;
+  mutable TrilinosWrappers::MPI::Vector serv_phi, serv_phi_imag;
+  mutable TrilinosWrappers::MPI::Vector serv_dphi_dn, serv_dphi_dn_imag;
+  mutable TrilinosWrappers::MPI::Vector serv_phi_robin, serv_phi_robin_imag;
+  TrilinosWrappers::MPI::Vector         serv_tmp_rhs, serv_tmp_rhs_imag;
 
-  AffineConstraints<double> constraints;
+  AffineConstraints<double> constraints, constraints_imag;
 
   std::string   preconditioner_type;
   std::string   mapping_type;
@@ -450,7 +464,7 @@ public:
   // vectorize to support multiple phi components
   std::vector<TrilinosWrappers::MPI::Vector> vector_gradients_solutions;
   std::vector<TrilinosWrappers::MPI::Vector> vector_surface_gradients_solutions;
-  std::vector<TrilinosWrappers::MPI::Vector> vector_normals_solutions;
+  TrilinosWrappers::MPI::Vector              vector_normals_solution;
 
   std::vector<types::global_dof_index> start_per_process;
   std::vector<types::global_dof_index> vector_start_per_process;
