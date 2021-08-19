@@ -223,6 +223,9 @@ public:
   void
   assemble_preconditioner();
 
+  void
+  assemble_preconditioner_complex();
+
   /// This is the function that guides the execution of the BEM problem.
   /// Depending on the resolution stategy we go whether for the direct or fma
   /// strategy.
@@ -576,12 +579,13 @@ public:
   SolverControl solver_control;
 
   // TODO AMG preconditioner
-  TrilinosWrappers::PreconditionILU preconditioner;
-  TrilinosWrappers::SparsityPattern preconditioner_sparsity_pattern;
+  TrilinosWrappers::PreconditionILU preconditioner, preconditioner_complex;
+  TrilinosWrappers::SparsityPattern preconditioner_sparsity_pattern,
+    preconditioner_complex_sparsity_pattern;
 
-  TrilinosWrappers::SparseMatrix band_system;
   types::global_dof_index        preconditioner_band;
-  bool                           is_preconditioner_initialized;
+  TrilinosWrappers::SparseMatrix band_system, band_system_complex;
+  bool is_preconditioner_initialized, is_preconditioner_complex_initialized;
 
   bool continuos_gradient;
 
@@ -607,7 +611,7 @@ public:
 
   /// The IndexSet for the problem without considering any ghost element for the
   /// scalar FE
-  IndexSet this_cpu_set;
+  IndexSet this_cpu_set, this_cpu_set_complex;
   /// The IndexSet for the problem considering every ghost element for the
   /// scalar FE
   IndexSet ghosted_set;
