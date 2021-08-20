@@ -1544,7 +1544,7 @@ BEMProblem<dim>::solve_system(TrilinosWrappers::MPI::Vector &      phi,
       assemble_preconditioner();
 
       sol.sadd(1., 0., system_rhs);
-      solver.solve(cc, sol, system_rhs, preconditioner);
+      solver.solve(cc, sol, system_rhs, get_preconditioner(false));
     }
   else
     {
@@ -1700,7 +1700,10 @@ BEMProblem<dim>::solve_system(TrilinosWrappers::MPI::Vector &      phi,
       assemble_preconditioner_complex();
 
       sol_complex.sadd(1., 0., system_rhs_complex);
-      solver.solve(cc, sol_complex, system_rhs_complex, preconditioner_complex);
+      solver.solve(cc,
+                   sol_complex,
+                   system_rhs_complex,
+                   get_preconditioner(true));
     }
   else
     {
@@ -2134,7 +2137,21 @@ BEMProblem<dim>::assemble_preconditioner()
         }
     }
 
-  preconditioner.initialize(band_system);
+  if (preconditioner_type == "ILU")
+    {
+      preconditioner.initialize(band_system);
+    }
+  else if (preconditioner_type == "AMG")
+    {
+      TrilinosWrappers::PreconditionAMG::AdditionalData data;
+      data.higher_order_elements = fe->degree > 1;
+
+      preconditioner_amg.initialize(band_system, data);
+    }
+  else
+    {
+      AssertThrow(false, ExcMessage("Invalid preconditioner type"));
+    }
 }
 
 template <int dim>
@@ -2248,7 +2265,22 @@ BEMProblem<dim>::assemble_preconditioner_complex()
             }
         }
     }
-  preconditioner_complex.initialize(band_system_complex);
+
+  if (preconditioner_type == "ILU")
+    {
+      preconditioner_complex.initialize(band_system_complex);
+    }
+  else if (preconditioner_type == "AMG")
+    {
+      TrilinosWrappers::PreconditionAMG::AdditionalData data;
+      data.higher_order_elements = fe->degree > 1;
+
+      preconditioner_complex_amg.initialize(band_system_complex, data);
+    }
+  else
+    {
+      AssertThrow(false, ExcMessage("Invalid preconditioner type"));
+    }
 }
 
 template <int dim>
