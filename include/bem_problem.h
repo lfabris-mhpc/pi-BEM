@@ -576,15 +576,15 @@ public:
     robin_matrix_diagonal_imag;
   TrilinosWrappers::MPI::Vector robin_rhs, robin_rhs_imag;
 
-  TrilinosWrappers::MPI::Vector system_rhs, system_rhs_imag;
+  TrilinosWrappers::MPI::Vector system_rhs; //, system_rhs_imag;
 
-  TrilinosWrappers::MPI::Vector sol, sol_imag;
-  TrilinosWrappers::MPI::Vector alpha;
+  TrilinosWrappers::MPI::Vector      sol;
+  TrilinosWrappers::MPI::BlockVector sol_blocked, system_rhs_blocked;
+  TrilinosWrappers::MPI::Vector      alpha;
 
   mutable TrilinosWrappers::MPI::Vector serv_phi, serv_phi_imag;
   mutable TrilinosWrappers::MPI::Vector serv_dphi_dn, serv_dphi_dn_imag;
   mutable TrilinosWrappers::MPI::Vector serv_phi_robin, serv_phi_robin_imag;
-  TrilinosWrappers::MPI::Vector         serv_tmp_rhs, serv_tmp_rhs_imag;
 
   AffineConstraints<double> constraints, constraints_imag;
 
@@ -628,7 +628,7 @@ public:
 
   /// The IndexSet for the problem without considering any ghost element for the
   /// scalar FE
-  IndexSet this_cpu_set, this_cpu_set_complex;
+  IndexSet this_cpu_set; //, this_cpu_set_complex;
   /// The IndexSet for the problem considering every ghost element for the
   /// scalar FE
   IndexSet ghosted_set;
