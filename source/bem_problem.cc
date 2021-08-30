@@ -8,7 +8,6 @@
 #include "../include/bem_problem.h"
 #include "../include/constrained_matrix_complex.h"
 #include "../include/laplace_kernel.h"
-#include "../include/preconditioner_complex_schur.h"
 #include "Teuchos_TimeMonitor.hpp"
 
 using Teuchos::RCP;
@@ -823,6 +822,9 @@ BEMProblem<dim>::assemble_system_tbb()
   {
     FEValues<dim - 1, dim>               fe_v;
     std::vector<types::global_dof_index> cell_dofs;
+    types::global_dof_index              row;
+    std::vector<double>                  neumann_row_entries;
+    std::vector<double>                  dirichlet_row_entries;
 
     AssembleScratch(const FiniteElement<dim - 1, dim> &fe,
                     const Quadrature<dim - 1> &        quadrature,
@@ -830,6 +832,9 @@ BEMProblem<dim>::assemble_system_tbb()
                     const UpdateFlags                  update_flags)
       : fe_v(mapping, fe, quadrature, update_flags)
       , cell_dofs(fe.dofs_per_cell)
+      , row(0)
+      , neumann_row_entries(fe.dofs_per_cell)
+      , dirichlet_row_entries(fe.dofs_per_cell)
     {}
 
     // poor man's copy ctor
@@ -839,29 +844,20 @@ BEMProblem<dim>::assemble_system_tbb()
              scratch.fe_v.get_quadrature(),
              scratch.fe_v.get_update_flags())
       , cell_dofs(scratch.fe_v.get_fe().dofs_per_cell)
+      , row(0)
+      , neumann_row_entries(scratch.fe_v.get_fe().dofs_per_cell)
+      , dirichlet_row_entries(scratch.fe_v.get_fe().dofs_per_cell)
     {}
   };
 
   struct AssembleLocalResult
-  {
-    types::global_dof_index row;
-    std::vector<double>     neumann_row_entries;
-    std::vector<double>     dirichlet_row_entries;
-  };
+  {};
 
   // lambda for preparing each row
   auto assemble_worker = [this,
                           &support_points](IndexSet::ElementIterator row_iter,
                                            AssembleScratch &         scratch,
                                            AssembleLocalResult &     local) {
-    local.row = *row_iter;
-    std::fill(local.neumann_row_entries.begin(),
-              local.neumann_row_entries.end(),
-              0);
-    std::fill(local.dirichlet_row_entries.begin(),
-              local.dirichlet_row_entries.end(),
-              0);
-
     Point<dim> D;
     double     s;
 
@@ -869,6 +865,14 @@ BEMProblem<dim>::assemble_system_tbb()
       {
         scratch.fe_v.reinit(cell);
         cell->get_dof_indices(scratch.cell_dofs);
+
+        scratch.row = *row_iter;
+        std::fill(scratch.neumann_row_entries.begin(),
+                  scratch.neumann_row_entries.end(),
+                  0);
+        std::fill(scratch.dirichlet_row_entries.begin(),
+                  scratch.dirichlet_row_entries.end(),
+                  0);
 
         const auto &q_points = scratch.fe_v.get_quadrature_points();
         const auto &normals  = scratch.fe_v.get_normal_vectors();
@@ -879,8 +883,8 @@ BEMProblem<dim>::assemble_system_tbb()
         // is any dof of the current cell, a duplicate of i?
         for (unsigned int j = 0; j < this->fe->dofs_per_cell; ++j)
           {
-            if (this->double_nodes_set[local.row].count(scratch.cell_dofs[j]) >
-                0)
+            if (this->double_nodes_set[scratch.row].count(
+                  scratch.cell_dofs[j]) > 0)
               {
                 singular_index = j;
                 is_singular    = true;
@@ -892,19 +896,20 @@ BEMProblem<dim>::assemble_system_tbb()
           {
             for (unsigned int q = 0; q < scratch.fe_v.n_quadrature_points; ++q)
               {
-                LaplaceKernel::kernels(q_points[q] - support_points[local.row],
-                                       D,
-                                       s);
+                LaplaceKernel::kernels(
+                  q_points[q] - support_points[scratch.row], D, s);
 
                 for (unsigned int j = 0; j < this->fe->dofs_per_cell; ++j)
                   {
                     const auto tmp =
                       scratch.fe_v.shape_value(j, q) * scratch.fe_v.JxW(q);
 
-                    local.neumann_row_entries[scratch.cell_dofs[j]] +=
-                      ((D * normals[q]) * tmp);
-                    local.dirichlet_row_entries[scratch.cell_dofs[j]] +=
-                      (s * tmp);
+                    // local.neumann_row_entries[scratch.cell_dofs[j]] +=
+                    //   ((D * normals[q]) * tmp);
+                    // local.dirichlet_row_entries[scratch.cell_dofs[j]] +=
+                    //   (s * tmp);
+                    scratch.neumann_row_entries[j] += ((D * normals[q]) * tmp);
+                    scratch.dirichlet_row_entries[j] += (s * tmp);
                   }
               }
           }
@@ -934,32 +939,30 @@ BEMProblem<dim>::assemble_system_tbb()
             for (unsigned int q = 0; q < singular_quadrature->size(); ++q)
               {
                 LaplaceKernel::kernels(
-                  singular_q_points[q] - support_points[local.row], D, s);
+                  singular_q_points[q] - support_points[scratch.row], D, s);
 
                 for (unsigned int j = 0; j < this->fe->dofs_per_cell; ++j)
                   {
                     const auto tmp =
                       fe_v_singular.shape_value(j, q) * fe_v_singular.JxW(q);
 
-                    local.neumann_row_entries[scratch.cell_dofs[j]] +=
+                    // local.neumann_row_entries[scratch.cell_dofs[j]] +=
+                    //   ((D * singular_normals[q]) * tmp);
+                    // local.dirichlet_row_entries[scratch.cell_dofs[j]] +=
+                    //   (s * tmp);
+                    scratch.neumann_row_entries[j] +=
                       ((D * singular_normals[q]) * tmp);
-                    local.dirichlet_row_entries[scratch.cell_dofs[j]] +=
-                      (s * tmp);
+                    scratch.dirichlet_row_entries[j] += (s * tmp);
                   }
               }
           }
-      }
 
-    // no merger function is needed; each row is on a different thread
-    for (types::global_dof_index j = 0; j < this->dh.n_dofs(); ++j)
-      {
-        this->neumann_matrix.set(local.row, j, local.neumann_row_entries[j]);
-      }
-    for (types::global_dof_index j = 0; j < this->dh.n_dofs(); ++j)
-      {
-        this->dirichlet_matrix.set(local.row,
-                                   j,
-                                   local.dirichlet_row_entries[j]);
+        this->neumann_matrix.add(scratch.row,
+                                 scratch.cell_dofs,
+                                 scratch.neumann_row_entries);
+        this->dirichlet_matrix.add(scratch.row,
+                                   scratch.cell_dofs,
+                                   scratch.dirichlet_row_entries);
       }
   };
 
@@ -971,8 +974,6 @@ BEMProblem<dim>::assemble_system_tbb()
                             update_quadrature_points | update_JxW_values);
 
   AssembleLocalResult local_result;
-  local_result.neumann_row_entries.resize(dh.n_dofs());
-  local_result.dirichlet_row_entries.resize(dh.n_dofs());
 
   // important: cache the singular quadratures in serial
   this->get_singular_quadrature(0);
