@@ -182,6 +182,12 @@ public:
   void
   assemble_system();
 
+  void
+  assemble_system_tbb();
+
+  void
+  assemble_system_old();
+
   /// The next three methods are
   /// needed by the GMRES solver:
   /// the first provides result of
