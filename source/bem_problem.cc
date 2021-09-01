@@ -277,7 +277,7 @@ BEMProblem<dim>::reinit()
                                            preconditioner_band);
   is_preconditioner_initialized = false;
 
-  IndexSet this_cpu_set_complex;
+  IndexSet this_cpu_set_complex(2 * this_cpu_set.size());
   this_cpu_set_complex.add_indices(this_cpu_set);
   this_cpu_set_complex.add_indices(this_cpu_set, this_cpu_set.size());
   this_cpu_set_complex.compress();
@@ -291,11 +291,114 @@ BEMProblem<dim>::reinit()
   dirichlet_nodes.reinit(this_cpu_set, mpi_communicator);
   neumann_nodes.reinit(this_cpu_set, mpi_communicator);
   robin_nodes.reinit(this_cpu_set, mpi_communicator);
+  freesurface_nodes.reinit(this_cpu_set, mpi_communicator);
+
   dirichlet_flags.reinit(this_cpu_set, mpi_communicator);
   neumann_flags.reinit(this_cpu_set, mpi_communicator);
   robin_flags.reinit(this_cpu_set, mpi_communicator);
+  freesurface_flags.reinit(this_cpu_set, mpi_communicator);
+
   compute_dirichlet_and_neumann_dofs_vectors();
   compute_double_nodes_set();
+
+  // TODO: unlike robin datastructs, the freesurface support objects are very
+  // heavy and should be actively skipped if unused
+  if (!comp_dom.freesurface_boundary_ids.empty())
+    {
+      TrilinosWrappers::SparsityPattern mass_sparsity_pattern;
+      // TODO: to populate the matrix from multiple threads, it is necessary to
+      // specify the writable rows in the reinit of the sparsity pattern
+      mass_sparsity_pattern.reinit(this_cpu_set, mpi_communicator);
+      // TODO: constraints are not available yet
+      DoFTools::make_sparsity_pattern(dh,
+                                      mass_sparsity_pattern,
+                                      AffineConstraints<double>(),
+                                      true,
+                                      this_mpi_process);
+      mass_sparsity_pattern.compress();
+
+      freesurface_mass_matrix.reinit(mass_sparsity_pattern);
+      freesurface_df_dx_matrix.reinit(mass_sparsity_pattern);
+      // freesurface_d2f_dx2_matrix.reinit(mass_sparsity_pattern);
+
+      std::vector<types::global_dof_index> cell_dofs(fe->dofs_per_cell);
+      FEValues<dim - 1, dim>               fe_v(*mapping,
+                                  *fe,
+                                  *quadrature,
+                                  update_values | update_gradients |
+                                    update_hessians | update_normal_vectors |
+                                    update_quadrature_points |
+                                    update_JxW_values);
+
+      for (const auto &cell : dh.active_cell_iterators())
+        {
+          fe_v.reinit(cell);
+          cell->get_dof_indices(cell_dofs);
+
+          // TODO: how to adapt this to the actual/previous computed streamline
+          // direction?
+          Tensor<1, dim> dir;
+          dir[0] = 1;
+          dir /= dir.norm();
+
+          // const double delta =
+          //   compute_stabilization_delta(cell->diameter(), 0, dir,
+          //   fe->degree);
+          // TODO: compute the cell's dimension along the streamline direction,
+          // or is it instead taking the
+          double delta = 1 / std::sqrt(2);
+          auto   d0    = cell->vertex(1) - cell->vertex(0);
+          auto   d1    = cell->vertex(2) - cell->vertex(0);
+          // d0 /= d0.norm();
+          // d1 /= d1.norm();
+          if (std::abs(d0 / d0.norm() * dir) > std::abs(d1 / d1.norm() * dir))
+            {
+              delta = std::abs(d0 * dir);
+            }
+          else
+            {
+              delta = std::abs(d1 * dir);
+            }
+
+          for (unsigned int ci = 0; ci < cell_dofs.size(); ++ci)
+            {
+              auto i = cell_dofs[ci];
+              if (this_cpu_set.is_element(i))
+                {
+                  for (unsigned int cq = 0; cq < fe_v.n_quadrature_points; ++cq)
+                    {
+                      auto shape_i = fe_v.shape_value(ci, cq);
+                      for (unsigned int cj = 0; cj < cell_dofs.size(); ++cj)
+                        {
+                          auto j            = cell_dofs[cj];
+                          auto shape_j      = fe_v.shape_value(cj, cq);
+                          auto shape_grad_j = fe_v.shape_grad(cj, cq);
+                          // the idea is to evaluate the shape function with a
+                          // contribution taken from the streamline
+                          shape_j *= 1 + delta * shape_grad_j * dir;
+                          shape_grad_j *= 1 + delta * shape_grad_j * dir;
+
+                          // TODO: implement the SUPG
+                          freesurface_mass_matrix.add(
+                            i, j, shape_i * shape_j * fe_v.JxW(cq));
+                          freesurface_df_dx_matrix.add(
+                            i, j, shape_i * shape_grad_j * dir * fe_v.JxW(cq));
+                          // freesurface_d2f_dx2_matrix.add(i, j,
+                          //   shape_i * fe_v.shape_hessian(cj, cq)[{0, 0}] *
+                          //   fe_v.JxW(cq));
+                        }
+                    }
+                }
+            }
+        }
+
+      freesurface_mass_matrix.compress(VectorOperation::insert);
+      freesurface_df_dx_matrix.compress(VectorOperation::insert);
+      // freesurface_d2f_dx2_matrix.compress(VectorOperation::insert);
+
+      freesurface_mass_preconditioner.clear();
+      freesurface_mass_preconditioner.initialize(freesurface_mass_matrix);
+    }
 
   if (solution_method == "FMA")
     {
@@ -446,13 +549,13 @@ BEMProblem<dim>::compute_dirichlet_and_neumann_dofs_vectors()
   Vector<double> non_partitioned_dirichlet_nodes(dh.n_dofs());
   Vector<double> non_partitioned_neumann_nodes(dh.n_dofs());
   Vector<double> non_partitioned_robin_nodes(dh.n_dofs());
+  Vector<double> non_partitioned_freesurface_nodes(dh.n_dofs());
 
   Vector<double> non_partitioned_dirichlet_flags(dh.n_dofs());
   Vector<double> non_partitioned_neumann_flags(dh.n_dofs());
   Vector<double> non_partitioned_robin_flags(dh.n_dofs());
+  Vector<double> non_partitioned_freesurface_flags(dh.n_dofs());
 
-  // defaulting to neumann
-  // vector_shift(non_partitioned_neumann_nodes, 1.);
   std::vector<types::global_dof_index> dofs(fe->dofs_per_cell);
   unsigned int                         local_can_determine_phi = 0;
 
@@ -472,9 +575,10 @@ BEMProblem<dim>::compute_dirichlet_and_neumann_dofs_vectors()
                   non_partitioned_dirichlet_flags(i) = 1;
 
                   // mark dofs on masking vectors
-                  non_partitioned_dirichlet_nodes(i) = 1;
-                  non_partitioned_neumann_nodes(i)   = 0;
-                  non_partitioned_robin_nodes(i)     = 0;
+                  non_partitioned_dirichlet_nodes(i)   = 1;
+                  non_partitioned_neumann_nodes(i)     = 0;
+                  non_partitioned_robin_nodes(i)       = 0;
+                  non_partitioned_freesurface_nodes(i) = 0;
                 }
 
               local_can_determine_phi = 1;
@@ -493,35 +597,58 @@ BEMProblem<dim>::compute_dirichlet_and_neumann_dofs_vectors()
                       non_partitioned_neumann_flags(i) = 1;
 
                       // mark dofs on masking vectors
-                      non_partitioned_dirichlet_nodes(i) = 0;
-                      non_partitioned_neumann_nodes(i)   = 1;
-                      non_partitioned_robin_nodes(i)     = 0;
+                      non_partitioned_dirichlet_nodes(i)   = 0;
+                      non_partitioned_neumann_nodes(i)     = 1;
+                      non_partitioned_robin_nodes(i)       = 0;
+                      non_partitioned_freesurface_nodes(i) = 0;
                     }
                 }
               else
                 {
-#ifdef DEBUG
                   bool is_robin = std::find(comp_dom.robin_boundary_ids.begin(),
                                             comp_dom.robin_boundary_ids.end(),
                                             cell->boundary_id()) !=
                                   comp_dom.robin_boundary_ids.end();
-                  Assert(is_robin, ExcInternalError());
-#endif
-                  cell->get_dof_indices(dofs);
-                  for (auto i : dofs)
+                  if (is_robin)
                     {
-                      non_partitioned_robin_flags(i) = 1;
-
-                      // mark dofs on masking vectors
-                      if (!non_partitioned_dirichlet_nodes(i) &&
-                          !non_partitioned_neumann_nodes(i))
+                      cell->get_dof_indices(dofs);
+                      for (auto i : dofs)
                         {
-                          non_partitioned_dirichlet_nodes(i) = 0;
-                          non_partitioned_neumann_nodes(i)   = 0;
-                          non_partitioned_robin_nodes(i)     = 1;
-                        }
+                          non_partitioned_robin_flags(i) = 1;
 
-                      local_can_determine_phi = 1;
+                          // mark dofs on masking vectors
+                          if (!non_partitioned_dirichlet_nodes(i) &&
+                              !non_partitioned_neumann_nodes(i))
+                            {
+                              non_partitioned_dirichlet_nodes(i)   = 0;
+                              non_partitioned_neumann_nodes(i)     = 0;
+                              non_partitioned_robin_nodes(i)       = 1;
+                              non_partitioned_freesurface_nodes(i) = 0;
+                            }
+
+                          local_can_determine_phi = 1;
+                        }
+                    }
+                  else
+                    {
+                      cell->get_dof_indices(dofs);
+                      for (auto i : dofs)
+                        {
+                          non_partitioned_freesurface_flags(i) = 1;
+
+                          // mark dofs on masking vectors
+                          if (!non_partitioned_dirichlet_nodes(i) &&
+                              !non_partitioned_neumann_nodes(i) &&
+                              !non_partitioned_robin_nodes(i))
+                            {
+                              non_partitioned_dirichlet_nodes(i)   = 0;
+                              non_partitioned_neumann_nodes(i)     = 0;
+                              non_partitioned_robin_nodes(i)       = 0;
+                              non_partitioned_freesurface_nodes(i) = 1;
+                            }
+
+                          local_can_determine_phi = 1;
+                        }
                     }
                 }
             }
@@ -530,13 +657,15 @@ BEMProblem<dim>::compute_dirichlet_and_neumann_dofs_vectors()
 
   for (auto i : this_cpu_set)
     {
-      dirichlet_nodes(i) = non_partitioned_dirichlet_nodes(i);
-      neumann_nodes(i)   = non_partitioned_neumann_nodes(i);
-      robin_nodes(i)     = non_partitioned_robin_nodes(i);
+      dirichlet_nodes(i)   = non_partitioned_dirichlet_nodes(i);
+      neumann_nodes(i)     = non_partitioned_neumann_nodes(i);
+      robin_nodes(i)       = non_partitioned_robin_nodes(i);
+      freesurface_nodes(i) = non_partitioned_freesurface_nodes(i);
 
-      dirichlet_flags(i) = non_partitioned_dirichlet_flags(i);
-      neumann_flags(i)   = non_partitioned_neumann_flags(i);
-      robin_flags(i)     = non_partitioned_robin_flags(i);
+      dirichlet_flags(i)   = non_partitioned_dirichlet_flags(i);
+      neumann_flags(i)     = non_partitioned_neumann_flags(i);
+      robin_flags(i)       = non_partitioned_robin_flags(i);
+      freesurface_flags(i) = non_partitioned_freesurface_flags(i);
     }
 
   {
@@ -553,6 +682,11 @@ BEMProblem<dim>::compute_dirichlet_and_neumann_dofs_vectors()
     pcout << "Number of Robin dofs: "
           << (int)(localized_robin.size() * localized_robin.mean_value())
           << std::endl;
+    Vector<double> localized_freesurface(freesurface_nodes);
+    pcout << "Number of free surface dofs: "
+          << (int)(localized_freesurface.size() *
+                   localized_freesurface.mean_value())
+          << std::endl;
 
     Vector<double> localized_dirichlet2(dirichlet_flags);
     pcout << "Number of Dirichlet flags: "
@@ -566,6 +700,11 @@ BEMProblem<dim>::compute_dirichlet_and_neumann_dofs_vectors()
     Vector<double> localized_robin2(robin_flags);
     pcout << "Number of Robin flags: "
           << (int)(localized_robin2.size() * localized_robin2.mean_value())
+          << std::endl;
+    Vector<double> localized_freesurface2(freesurface_flags);
+    pcout << "Number of free surface flags: "
+          << (int)(localized_freesurface2.size() *
+                   localized_freesurface2.mean_value())
           << std::endl;
   }
 
@@ -1466,6 +1605,66 @@ BEMProblem<dim>::compute_alpha()
 
 template <int dim>
 void
+BEMProblem<dim>::freesurface_phi_to_d2phi_dx2(
+  TrilinosWrappers::MPI::Vector &      dphi_dn_freesurface,
+  const TrilinosWrappers::MPI::Vector &phi_freesurface) const
+{
+  BEMProblem<dim>::freesurface_phi_to_d2phi_dx2_v1(dphi_dn_freesurface,
+                                                   phi_freesurface);
+}
+
+template <int dim>
+void
+BEMProblem<dim>::freesurface_phi_to_d2phi_dx2_v1(
+  TrilinosWrappers::MPI::Vector &      dphi_dn_freesurface,
+  const TrilinosWrappers::MPI::Vector &phi_freesurface) const
+{
+  TrilinosWrappers::MPI::Vector tmp;
+  tmp.reinit(phi_freesurface, false);
+
+  // the final result will initialize dphi_dn_freesurface such that:
+  // freesurface_mass_matrix * dphi_dn_freesurface = freesurface_coeffs *
+  // freesurface_df_dx_matrix * freesurface_mass_matrix^-1 *
+  // freesurface_df_dx_matrix * phi_freesurface
+
+  // tmp = freesurface_df_dx_matrix * phi_freesurface
+  freesurface_df_dx_matrix.vmult(tmp, phi_freesurface);
+
+  // dphi_dn_freesurface = freesurface_mass_matrix^-1 * tmp
+  // TODO: move preconditioner inside reinit
+  SolverControl                           controller0;
+  SolverCG<TrilinosWrappers::MPI::Vector> solver0(controller0);
+
+  solver0.solve(freesurface_mass_matrix,
+                dphi_dn_freesurface,
+                tmp,
+                freesurface_mass_preconditioner);
+
+  // tmp = freesurface_df_dx_matrix * dphi_dn_freesurface
+  freesurface_df_dx_matrix.vmult(tmp, dphi_dn_freesurface);
+
+  // dphi_dn_freesurface = freesurface_mass_matrix^-1 * tmp
+  SolverControl                           controller1;
+  SolverCG<TrilinosWrappers::MPI::Vector> solver1(controller1);
+
+  solver1.solve(freesurface_mass_matrix,
+                dphi_dn_freesurface,
+                tmp,
+                freesurface_mass_preconditioner);
+}
+
+template <int dim>
+void
+BEMProblem<dim>::freesurface_phi_to_d2phi_dx2_v2(
+  TrilinosWrappers::MPI::Vector &,
+  const TrilinosWrappers::MPI::Vector &) const
+{
+  AssertThrow(fe->degree > 1,
+              ExcMessage("Element order does not support second derivative"));
+}
+
+template <int dim>
+void
 BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
                        const TrilinosWrappers::MPI::Vector &src) const
 {
@@ -1475,26 +1674,43 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
   //(alpha + N) * (serv_phi + serv_phi_robin) - D * (serv_dphi_dn -
   // robin_matrix_diagonal.scale(serv_phi_robin))
 
+  dst = 0;
+
   serv_phi = src;
   if (!can_determine_phi)
     {
       vector_shift(serv_phi, -serv_phi.l2_norm());
     }
-  serv_dphi_dn   = src;
-  serv_phi_robin = serv_phi;
-
-  dst = 0;
-
   serv_phi.scale(neumann_nodes);
+
+  serv_dphi_dn = src;
   serv_dphi_dn.scale(dirichlet_nodes);
-  serv_phi_robin.scale(robin_nodes);
+
+  // conversion to dphi_dn - any of these two will have can_determine_phi =
+  // true, so no previous phi shift
+  if (!comp_dom.robin_boundary_ids.empty())
+    {
+      serv_phi_robin = src;
+      serv_phi_robin.scale(robin_nodes);
+
+      serv_phi += serv_phi_robin;
+      serv_phi_robin.scale(robin_scaler);
+      serv_dphi_dn -= serv_phi_robin;
+    }
+  if (!comp_dom.freesurface_boundary_ids.empty())
+    {
+      serv_phi_freesurface = src;
+      serv_phi_freesurface.scale(freesurface_nodes);
+
+      serv_phi += serv_phi_freesurface;
+      // override serv_phi_robin, used as a tmp
+      freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
+      serv_phi_robin.scale(freesurface_scaler);
+      serv_dphi_dn -= serv_phi_robin;
+    }
 
   if (solution_method == "Direct")
     {
-      serv_phi += serv_phi_robin;
-      serv_phi_robin.scale(robin_matrix_diagonal);
-      serv_dphi_dn -= serv_phi_robin;
-
       dirichlet_matrix.vmult(dst, serv_dphi_dn);
       dst *= -1;
       neumann_matrix.vmult_add(dst, serv_phi);
@@ -1504,10 +1720,6 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
   else
     {
       AssertThrow(dim == 3, ExcMessage("FMA only works in 3D"));
-
-      serv_phi += serv_phi_robin;
-      serv_phi_robin.scale(robin_matrix_diagonal);
-      serv_dphi_dn -= serv_phi_robin;
 
       static TrilinosWrappers::MPI::Vector matrVectProdN(this_cpu_set,
                                                          mpi_communicator);
@@ -1534,6 +1746,7 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
     {
       vector_shift(dst, -dst.l2_norm());
     }
+
   dst.compress(VectorOperation::add);
 }
 
@@ -1550,6 +1763,9 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
   //(alpha + N) * (serv_phi + serv_phi_robin) - D * (serv_dphi_dn -
   // robin_matrix_diagonal.scale(serv_phi_robin))
 
+  dst      = 0;
+  dst_imag = 0;
+
   serv_phi      = src;
   serv_phi_imag = src_imag;
   if (!can_determine_phi)
@@ -1558,10 +1774,13 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
       vector_shift(serv_phi, -shift);
       vector_shift(serv_phi_imag, -shift);
     }
-  serv_dphi_dn        = src;
-  serv_dphi_dn_imag   = src_imag;
-  serv_phi_robin      = serv_phi;
-  serv_phi_robin_imag = serv_phi_imag;
+  serv_phi.scale(neumann_nodes);
+  serv_phi_imag.scale(neumann_nodes);
+
+  serv_dphi_dn      = src;
+  serv_dphi_dn_imag = src_imag;
+  serv_dphi_dn.scale(dirichlet_nodes);
+  serv_dphi_dn_imag.scale(dirichlet_nodes);
 
   static TrilinosWrappers::MPI::Vector tmp(this_cpu_set, mpi_communicator);
   if (tmp.size() != src.size())
@@ -1569,21 +1788,19 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
       tmp.reinit(this_cpu_set, mpi_communicator);
     }
 
-  dst      = 0;
-  dst_imag = 0;
-
-  serv_phi.scale(neumann_nodes);
-  serv_phi_imag.scale(neumann_nodes);
-  serv_dphi_dn.scale(dirichlet_nodes);
-  serv_dphi_dn_imag.scale(dirichlet_nodes);
-  serv_phi_robin.scale(robin_nodes);
-  serv_phi_robin_imag.scale(robin_nodes);
-
-  if (solution_method == "Direct")
+  // conversion to dphi_dn - any of these two will have can_determine_phi =
+  // true, so no previous phi shift
+  if (!comp_dom.robin_boundary_ids.empty())
     {
+      serv_phi_robin      = src;
+      serv_phi_robin_imag = src_imag;
+      serv_phi_robin.scale(robin_nodes);
+      serv_phi_robin_imag.scale(robin_nodes);
+
       serv_phi += serv_phi_robin;
       serv_phi_imag += serv_phi_robin_imag;
 
+      // conversion to dphi_dn
       // robin_matrix_diagonal is complex
       // serv_dphi_dn += -robin_matrix_diagonal*serv_phi_robin +
       // robin_matrix_diagonal_imag * serv_phi_robin_imag
@@ -1592,17 +1809,46 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
       // robin_matrix_diagonal * serv_phi_robin_imag
 
       tmp = serv_phi_robin;
-      tmp.scale(robin_matrix_diagonal);
+      tmp.scale(robin_scaler);
       serv_dphi_dn -= tmp;
       tmp = serv_phi_robin_imag;
-      tmp.scale(robin_matrix_diagonal_imag);
+      tmp.scale(robin_scaler_imag);
       serv_dphi_dn += tmp;
 
       // these can be destructive
-      serv_phi_robin.scale(robin_matrix_diagonal_imag);
-      serv_phi_robin_imag.scale(robin_matrix_diagonal);
+      serv_phi_robin.scale(robin_scaler_imag);
+      serv_phi_robin_imag.scale(robin_scaler);
       serv_dphi_dn_imag.add(-1, serv_phi_robin, -1, serv_phi_robin_imag);
+    }
+  if (!comp_dom.freesurface_boundary_ids.empty())
+    {
+      serv_phi_freesurface      = src;
+      serv_phi_freesurface_imag = src_imag;
+      serv_phi_freesurface.scale(freesurface_nodes);
+      serv_phi_freesurface_imag.scale(freesurface_nodes);
 
+      serv_phi += serv_phi_freesurface;
+      serv_phi_imag += serv_phi_freesurface_imag;
+
+      // override serv_phi_robin, used as a tmp
+      freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
+      freesurface_phi_to_d2phi_dx2(serv_phi_robin_imag,
+                                   serv_phi_freesurface_imag);
+      tmp = serv_phi_robin;
+      tmp.scale(freesurface_scaler);
+      serv_dphi_dn -= tmp;
+      tmp = serv_phi_robin_imag;
+      tmp.scale(freesurface_scaler_imag);
+      serv_dphi_dn += tmp;
+
+      // these can be destructive
+      serv_phi_robin.scale(freesurface_scaler_imag);
+      serv_phi_robin_imag.scale(freesurface_scaler);
+      serv_dphi_dn_imag.add(-1, serv_phi_robin, -1, serv_phi_robin_imag);
+    }
+
+  if (solution_method == "Direct")
+    {
       // now, products between the plain matrices and the spiked vectors
       dirichlet_matrix.vmult(dst, serv_dphi_dn);
       dirichlet_matrix.vmult(dst_imag, serv_dphi_dn_imag);
@@ -1618,23 +1864,6 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
   else
     {
       AssertThrow(dim == 3, ExcMessage("FMA only works in 3D"));
-
-      serv_phi += serv_phi_robin;
-      serv_phi_imag += serv_phi_robin_imag;
-
-      // the dphi_dn vectors will be spiked with the contribution from robin
-      // nodes
-      tmp = serv_phi_robin;
-      tmp.scale(robin_matrix_diagonal);
-      serv_dphi_dn -= tmp;
-      tmp = serv_phi_robin_imag;
-      tmp.scale(robin_matrix_diagonal_imag);
-      serv_dphi_dn += tmp;
-
-      // these can be destructive
-      serv_phi_robin.scale(robin_matrix_diagonal_imag);
-      serv_phi_robin_imag.scale(robin_matrix_diagonal);
-      serv_dphi_dn_imag.add(-1, serv_phi_robin, -1, serv_phi_robin_imag);
 
       static TrilinosWrappers::MPI::Vector matrVectProdN(this_cpu_set,
                                                          mpi_communicator);
@@ -1694,15 +1923,30 @@ BEMProblem<dim>::compute_rhs(TrilinosWrappers::MPI::Vector &      dst,
   //-(alpha + N) * serv_phi + D * serv_dphi_dn
   // becomes
   //-(alpha + N) * serv_phi + D * (serv_dphi_dn + robin_rhs)
-  serv_phi     = src;
-  serv_dphi_dn = src;
-
-  // Robin nodes are accounted for by robin_rhs
+  serv_phi = src;
   serv_phi.scale(dirichlet_nodes);
+
+  serv_dphi_dn = src;
   serv_dphi_dn.scale(neumann_nodes);
-  // cut the robin_rhs to only the true robin nodes
-  serv_phi_robin = robin_rhs;
-  serv_phi_robin.scale(robin_nodes);
+
+  if (!comp_dom.robin_boundary_ids.empty())
+    {
+      // Robin nodes are accounted for by robin_rhs
+      // cut the robin_rhs to only the true robin nodes
+      serv_phi_robin = robin_rhs;
+      serv_phi_robin.scale(robin_nodes);
+
+      serv_dphi_dn += serv_phi_robin;
+    }
+  if (!comp_dom.freesurface_boundary_ids.empty())
+    {
+      // freesurface nodes are accounted for by freesurface_rhs
+      // cut the freesurface_rhs to only the true freesurface nodes
+      serv_phi_freesurface = freesurface_rhs;
+      serv_phi_freesurface.scale(freesurface_nodes);
+
+      serv_dphi_dn += serv_phi_freesurface;
+    }
 
   if (solution_method == "Direct")
     {
@@ -1710,15 +1954,12 @@ BEMProblem<dim>::compute_rhs(TrilinosWrappers::MPI::Vector &      dst,
       serv_phi.scale(alpha);
       dst += serv_phi;
       dst *= -1;
-      serv_dphi_dn += serv_phi_robin;
       dirichlet_matrix.vmult_add(dst, serv_dphi_dn);
     }
   else
     {
       AssertThrow(dim == 3, ExcMessage("FMA only works in 3D"));
 
-      fma.generate_multipole_expansions(serv_phi, serv_dphi_dn);
-      serv_dphi_dn += serv_phi_robin;
 
       static TrilinosWrappers::MPI::Vector matrVectProdN(this_cpu_set,
                                                          mpi_communicator);
@@ -1730,6 +1971,7 @@ BEMProblem<dim>::compute_rhs(TrilinosWrappers::MPI::Vector &      dst,
           matrVectProdD.reinit(this_cpu_set, mpi_communicator);
         }
 
+      fma.generate_multipole_expansions(serv_phi, serv_dphi_dn);
       fma.multipole_matr_vect_products(serv_phi,
                                        serv_dphi_dn,
                                        matrVectProdN,
@@ -1755,21 +1997,36 @@ BEMProblem<dim>::compute_rhs(
   //-(alpha + N) * serv_phi + D * serv_dphi_dn
   // becomes
   //-(alpha + N) * serv_phi + D * (serv_dphi_dn + robin_rhs)
-  serv_phi            = src;
-  serv_phi_imag       = src_imag;
-  serv_dphi_dn        = src;
-  serv_dphi_dn_imag   = src_imag;
-  serv_phi_robin      = robin_rhs;
-  serv_phi_robin_imag = robin_rhs_imag;
-
-  // Robin nodes are accounted for by robin_rhs
+  serv_phi      = src;
+  serv_phi_imag = src_imag;
   serv_phi.scale(dirichlet_nodes);
   serv_phi_imag.scale(dirichlet_nodes);
+
+  serv_dphi_dn      = src;
+  serv_dphi_dn_imag = src_imag;
   serv_dphi_dn.scale(neumann_nodes);
   serv_dphi_dn_imag.scale(neumann_nodes);
-  // cut the robin_rhs to only the true robin nodes
-  serv_phi_robin.scale(robin_nodes);
-  serv_phi_robin_imag.scale(robin_nodes);
+
+  if (!comp_dom.robin_boundary_ids.empty())
+    {
+      serv_phi_robin      = robin_rhs;
+      serv_phi_robin_imag = robin_rhs_imag;
+      serv_phi_robin.scale(robin_nodes);
+      serv_phi_robin_imag.scale(robin_nodes);
+
+      serv_dphi_dn += serv_phi_robin;
+      serv_dphi_dn_imag += serv_phi_robin_imag;
+    }
+  if (!comp_dom.freesurface_boundary_ids.empty())
+    {
+      serv_phi_freesurface      = freesurface_rhs;
+      serv_phi_freesurface_imag = freesurface_rhs_imag;
+      serv_phi_freesurface.scale(freesurface_nodes);
+      serv_phi_freesurface_imag.scale(freesurface_nodes);
+
+      serv_dphi_dn += serv_phi_freesurface;
+      serv_dphi_dn_imag += serv_phi_freesurface_imag;
+    }
 
   if (solution_method == "Direct")
     {
@@ -1785,18 +2042,12 @@ BEMProblem<dim>::compute_rhs(
       dst *= -1;
       dst_imag *= -1;
 
-      serv_dphi_dn += serv_phi_robin;
-      serv_dphi_dn_imag += serv_phi_robin_imag;
-
       dirichlet_matrix.vmult_add(dst, serv_dphi_dn);
       dirichlet_matrix.vmult_add(dst_imag, serv_dphi_dn_imag);
     }
   else
     {
       AssertThrow(dim == 3, ExcMessage("FMA only works in 3D"));
-
-      serv_dphi_dn += serv_phi_robin;
-      serv_dphi_dn_imag += serv_phi_robin_imag;
 
       static TrilinosWrappers::MPI::Vector matrVectProdN(this_cpu_set,
                                                          mpi_communicator);
@@ -1894,11 +2145,33 @@ BEMProblem<dim>::solve_system(TrilinosWrappers::MPI::Vector &      phi,
         {
           dphi_dn(i) = sol(i);
         }
+      else if (robin_nodes(i) == 1)
+        {
+          phi(i)     = sol(i);
+          dphi_dn(i) = robin_rhs(i) - robin_scaler(i) * phi(i);
+        }
       else
         {
-          Assert(robin_nodes(i) == 1, ExcInternalError());
-          phi(i)     = sol(i);
-          dphi_dn(i) = robin_rhs(i) - robin_matrix_diagonal(i) * phi(i);
+          // freesurface dphi_dns must be retrieved all at once
+          phi(i) = sol(i);
+        }
+    }
+
+  if (!comp_dom.freesurface_boundary_ids.empty())
+    {
+      serv_phi_freesurface = sol;
+      serv_phi_freesurface.scale(freesurface_nodes);
+
+      freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
+      serv_phi_robin.scale(freesurface_scaler);
+      serv_phi_robin.sadd(-1, freesurface_rhs);
+
+      for (auto i : this_cpu_set)
+        {
+          if (freesurface_nodes(i) == 1)
+            {
+              dphi_dn(i) = serv_phi_robin(i);
+            }
         }
     }
 
@@ -1982,23 +2255,61 @@ BEMProblem<dim>::solve_system(TrilinosWrappers::MPI::Vector &      phi,
           dphi_dn(i)      = sol_blocked.block(0)(i);
           dphi_dn_imag(i) = sol_blocked.block(1)(i);
         }
-      else
+      else if (robin_nodes(i) == 1)
         {
-          AssertThrow(robin_nodes(i) == 1,
-                      ExcMessage("Inconsistent boundary condition map"));
-
           phi(i)      = sol_blocked.block(0)(i);
           phi_imag(i) = sol_blocked.block(1)(i);
 
           // retrieval of dphi_dn using complex coefficients
-          std::complex<double> c0_c1(robin_matrix_diagonal(i),
-                                     robin_matrix_diagonal_imag(i));
+          std::complex<double> c0_c1(robin_scaler(i), robin_scaler_imag(i));
           std::complex<double> c2_c1(robin_rhs(i), robin_rhs_imag(i));
           std::complex<double> ph(phi(i), phi_imag(i));
           std::complex<double> dph_dn(c2_c1 - c0_c1 * ph);
 
           dphi_dn(i)      = std::real(dph_dn);
           dphi_dn_imag(i) = std::imag(dph_dn);
+        }
+      else
+        {
+          // freesurface dphi_dns must be retrieved all at once
+          phi(i)      = sol_blocked.block(0)(i);
+          phi_imag(i) = sol_blocked.block(1)(i);
+        }
+    }
+
+  if (!comp_dom.freesurface_boundary_ids.empty())
+    {
+      serv_phi_freesurface      = sol_blocked.block(0);
+      serv_phi_freesurface_imag = sol_blocked.block(1);
+      serv_phi_freesurface.scale(freesurface_nodes);
+      serv_phi_freesurface_imag.scale(freesurface_nodes);
+
+      // override serv_phi_robin, used as a tmp
+      freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
+      freesurface_phi_to_d2phi_dx2(serv_phi_robin_imag,
+                                   serv_phi_freesurface_imag);
+      // TODO: temporary, is there anything else to be recycled?
+      TrilinosWrappers::MPI::Vector tmp;
+
+      tmp = serv_phi_robin;
+      tmp.scale(freesurface_scaler);
+      serv_dphi_dn -= tmp;
+      tmp = serv_phi_robin_imag;
+      tmp.scale(freesurface_scaler_imag);
+      serv_dphi_dn += tmp;
+
+      // these can be destructive
+      serv_phi_robin.scale(freesurface_scaler_imag);
+      serv_phi_robin_imag.scale(freesurface_scaler);
+      serv_dphi_dn_imag.add(-1, serv_phi_robin, -1, serv_phi_robin_imag);
+
+      for (auto i : this_cpu_set)
+        {
+          if (freesurface_nodes(i) == 1)
+            {
+              dphi_dn(i)      = serv_dphi_dn(i);
+              dphi_dn_imag(i) = serv_dphi_dn_imag(i);
+            }
         }
     }
 
@@ -2375,8 +2686,7 @@ BEMProblem<dim>::assemble_preconditioner()
                     {
                       band_system.add(i,
                                       j,
-                                      dirichlet_matrix(i, j) *
-                                        robin_matrix_diagonal(j));
+                                      dirichlet_matrix(i, j) * robin_scaler(j));
                     }
 
                   if (i == j)
@@ -2474,14 +2784,12 @@ BEMProblem<dim>::assemble_preconditioner_complex()
                       // scale the row from D, using the robin matrix
                       // diagonal
                       // for now, ignore the pairing parts
-                      band_system_complex.add(i,
-                                              j,
-                                              dirichlet_matrix(i, j) *
-                                                robin_matrix_diagonal(j));
+                      band_system_complex.add(
+                        i, j, dirichlet_matrix(i, j) * robin_scaler(j));
                       band_system_complex.add(i + this_cpu_set.size(),
                                               j + this_cpu_set.size(),
                                               dirichlet_matrix(i, j) *
-                                                robin_matrix_diagonal(j));
+                                                robin_scaler(j));
 
                       // check for pairing elements
                       if ((robin_nodes(i) == 1) &&
@@ -2493,13 +2801,11 @@ BEMProblem<dim>::assemble_preconditioner_complex()
                           band_system_complex.add(i,
                                                   j + this_cpu_set.size(),
                                                   -dirichlet_matrix(i, j) *
-                                                    robin_matrix_diagonal_imag(
-                                                      j));
+                                                    robin_scaler_imag(j));
                           band_system_complex.add(i + this_cpu_set.size(),
                                                   j,
                                                   dirichlet_matrix(i, j) *
-                                                    robin_matrix_diagonal_imag(
-                                                      j));
+                                                    robin_scaler_imag(j));
                         }
                     }
 

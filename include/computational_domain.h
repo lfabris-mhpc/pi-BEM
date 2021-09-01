@@ -268,6 +268,7 @@ public:
   /// input file, for the neumann_nodes
   std::vector<unsigned int> neumann_boundary_ids;
   std::vector<unsigned int> robin_boundary_ids;
+  std::vector<unsigned int> freesurface_boundary_ids;
 
   std::map<unsigned int, unsigned int> manifold2bcondition_map;
   std::map<unsigned int, unsigned int> manifold2bcondition_slot_map;

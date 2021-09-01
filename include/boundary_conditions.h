@@ -72,6 +72,7 @@ enum BoundaryConditionType
   dirichlet,
   neumann,
   robin,
+  freesurface,
   invalid
 };
 
@@ -100,6 +101,7 @@ public:
     , winds(n_components * MAX_CONDITION_SLOTS)
     , potentials(n_components * MAX_CONDITION_SLOTS)
     , robin_coeffs(n_components * MAX_CONDITION_SLOTS)
+    , freesurface_coeffs(n_components * MAX_CONDITION_SLOTS)
     , comp_dom(comp_dom)
     , bem(bem)
     , phis(n_components)
@@ -126,16 +128,26 @@ public:
   prepare_bem_vectors(TrilinosWrappers::MPI::Vector &rhs);
 
   void
-  prepare_robin_datastructs(
-    TrilinosWrappers::MPI::Vector &robin_matrix_diagonal,
-    TrilinosWrappers::MPI::Vector &robin_rhs);
+  prepare_robin_datastructs(TrilinosWrappers::MPI::Vector &robin_scaler,
+                            TrilinosWrappers::MPI::Vector &robin_rhs);
 
   void
-  prepare_robin_datastructs(
-    TrilinosWrappers::MPI::Vector &robin_matrix_diagonal,
-    TrilinosWrappers::MPI::Vector &robin_matrix_diagonal_imag,
-    TrilinosWrappers::MPI::Vector &robin_rhs,
-    TrilinosWrappers::MPI::Vector &robin_rhs_imag);
+  prepare_robin_datastructs(TrilinosWrappers::MPI::Vector &robin_scaler,
+                            TrilinosWrappers::MPI::Vector &robin_scaler_imag,
+                            TrilinosWrappers::MPI::Vector &robin_rhs,
+                            TrilinosWrappers::MPI::Vector &robin_rhs_imag);
+
+  void
+  prepare_freesurface_datastructs(
+    TrilinosWrappers::MPI::Vector &freesurface_scaler,
+    TrilinosWrappers::MPI::Vector &freesurface_rhs);
+
+  void
+  prepare_freesurface_datastructs(
+    TrilinosWrappers::MPI::Vector &freesurface_scaler,
+    TrilinosWrappers::MPI::Vector &freesurface_scaler_imag,
+    TrilinosWrappers::MPI::Vector &freesurface_rhs,
+    TrilinosWrappers::MPI::Vector &freesurface_rhs_imag);
 
   void
   solve_problem(bool reset_matrix = true);
@@ -168,6 +180,7 @@ public:
         winds.resize(n_components * MAX_CONDITION_SLOTS);
         potentials.resize(n_components * MAX_CONDITION_SLOTS);
         robin_coeffs.resize(n_components * MAX_CONDITION_SLOTS);
+        freesurface_coeffs.resize(n_components * MAX_CONDITION_SLOTS);
         phis.resize(n_components);
         dphi_dns.resize(n_components);
 
@@ -188,27 +201,6 @@ public:
     current_component = component;
     bem.set_current_phi_component(component);
   }
-
-  // wrap extraction of current component; public interface retrieves const&
-  // objects
-  // The argument-less methods retrieve the current component
-  // const Functions::ParsedFunction<dim> &
-  // get_wind(unsigned int slot) const
-  // {
-  //   return *winds[current_component * MAX_CONDITION_SLOTS + slot];
-  // }
-
-  // const Functions::ParsedFunction<dim> &
-  // get_potential(unsigned int slot) const
-  // {
-  //   return *potentials[current_component * MAX_CONDITION_SLOTS + slot];
-  // }
-
-  // const Functions::ParsedFunction<dim> &
-  // get_robin_coeffs(unsigned int slot) const
-  // {
-  //   return *robin_coeffs[current_component * MAX_CONDITION_SLOTS + slot];
-  // }
 
   // otherwise, explicitly request the desired component
   const Functions::ParsedFunction<dim> &
@@ -233,6 +225,14 @@ public:
     AssertIndexRange(component * MAX_CONDITION_SLOTS + slot,
                      n_components * MAX_CONDITION_SLOTS);
     return *robin_coeffs[component * MAX_CONDITION_SLOTS + slot];
+  }
+
+  const Functions::ParsedFunction<dim> &
+  get_freesurface_coeffs(unsigned int component, unsigned int slot) const
+  {
+    AssertIndexRange(component * MAX_CONDITION_SLOTS + slot,
+                     n_components * MAX_CONDITION_SLOTS);
+    return *freesurface_coeffs[component * MAX_CONDITION_SLOTS + slot];
   }
 
   // same as above, for the Vectors; however, retrieve non-const&
@@ -261,55 +261,6 @@ public:
     AssertIndexRange(component, n_components);
     return dphi_dns[component];
   }
-
-  /// elemetal norm of the combined phi components
-  // TrilinosWrappers::MPI::Vector
-  // get_phi_components_norm()
-  // {
-  //   TrilinosWrappers::MPI::Vector accumulate(this_cpu_set,
-  //                                            get_phi(0),
-  //                                            mpi_communicator);
-  //   accumulate.scale(get_phi(0));
-  //   for (unsigned int comp = 1; comp < n_components; ++comp)
-  //     {
-  //       TrilinosWrappers::MPI::Vector tmp = get_phi(comp);
-  //       tmp.scale(get_phi(comp));
-  //       accumulate.add(tmp);
-  //     }
-  //   for (auto i : this_cpu_set)
-  //     {
-  //       accumulate[i] = std::sqrt(accumulate[i]);
-  //     }
-
-  //   // accumulate.compress(VectorOperation::add);
-  //   accumulate.compress(VectorOperation::insert);
-
-  //   return accumulate;
-  // }
-
-  // TrilinosWrappers::MPI::Vector
-  // get_dphi_dn_components_norm()
-  // {
-  //   TrilinosWrappers::MPI::Vector accumulate(this_cpu_set,
-  //                                            get_dphi_dn(0),
-  //                                            mpi_communicator);
-  //   accumulate.scale(get_dphi_dn(0));
-  //   for (unsigned int comp = 1; comp < n_components; ++comp)
-  //     {
-  //       TrilinosWrappers::MPI::Vector tmp = get_dphi_dn(comp);
-  //       tmp.scale(get_dphi_dn(comp));
-  //       accumulate.add(tmp);
-  //     }
-  //   for (auto i : this_cpu_set)
-  //     {
-  //       accumulate[i] = std::sqrt(accumulate[i]);
-  //     }
-
-  //   // accumulate.compress(VectorOperation::add);
-  //   accumulate.compress(VectorOperation::insert);
-
-  //   return accumulate;
-  // }
 
   /// get all components as blocks
   TrilinosWrappers::MPI::BlockVector
@@ -382,12 +333,22 @@ protected:
     return *robin_coeffs[component * MAX_CONDITION_SLOTS + slot];
   }
 
+  Functions::ParsedFunction<dim> &
+  get_freesurface_coeffs(unsigned int component, unsigned int slot)
+  {
+    AssertIndexRange(component * MAX_CONDITION_SLOTS + slot,
+                     n_components * MAX_CONDITION_SLOTS);
+    return *freesurface_coeffs[component * MAX_CONDITION_SLOTS + slot];
+  }
+
   unsigned int n_components;
   unsigned int current_component;
   // each vector holds MAX_COMPONENTS * MAX_CONDITION_SLOTS functions
   std::vector<std::unique_ptr<Functions::ParsedFunction<dim>>> winds;
   std::vector<std::unique_ptr<Functions::ParsedFunction<dim>>> potentials;
   std::vector<std::unique_ptr<Functions::ParsedFunction<dim>>> robin_coeffs;
+  std::vector<std::unique_ptr<Functions::ParsedFunction<dim>>>
+    freesurface_coeffs;
 
   std::string node_displacement_type;
 
@@ -405,10 +366,8 @@ protected:
   std::vector<TrilinosWrappers::MPI::Vector> phis;
   std::vector<TrilinosWrappers::MPI::Vector> dphi_dns;
 
-  MPI_Comm mpi_communicator;
-
+  MPI_Comm     mpi_communicator;
   unsigned int n_mpi_processes;
-
   unsigned int this_mpi_process;
 
   bool can_determine_phi;

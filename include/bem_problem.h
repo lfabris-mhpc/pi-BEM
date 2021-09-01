@@ -188,6 +188,34 @@ public:
   void
   assemble_system_old();
 
+  double
+  compute_stabilization_delta(const double         hk,
+                              const double         eps,
+                              const Tensor<1, dim> dir,
+                              const double         pk)
+  {
+    const double Peclet = dir.norm() * hk / (2.0 * eps * pk);
+    const double coth =
+      (1.0 + std::exp(-2.0 * Peclet)) / (1.0 - std::exp(-2.0 * Peclet));
+
+    return hk / (2.0 * dir.norm() * pk) * (coth - 1.0 / Peclet);
+  }
+
+  void
+  freesurface_phi_to_d2phi_dx2(
+    TrilinosWrappers::MPI::Vector &      dphi_dn_freesurface,
+    const TrilinosWrappers::MPI::Vector &phi_freesurface) const;
+
+  void
+  freesurface_phi_to_d2phi_dx2_v1(
+    TrilinosWrappers::MPI::Vector &      dphi_dn_freesurface,
+    const TrilinosWrappers::MPI::Vector &phi_freesurface) const;
+
+  void
+  freesurface_phi_to_d2phi_dx2_v2(
+    TrilinosWrappers::MPI::Vector &      dphi_dn_freesurface,
+    const TrilinosWrappers::MPI::Vector &phi_freesurface) const;
+
   /// The next three methods are
   /// needed by the GMRES solver:
   /// the first provides result of
@@ -384,7 +412,7 @@ public:
     Vector<double> localized_neumann_nodes(neumann_nodes);
     Vector<double> localized_robin_nodes(robin_nodes);
     Vector<double> localized_alpha(alpha);
-    Vector<double> localized_robin_matrix_diagonal(robin_matrix_diagonal);
+    Vector<double> localized_robin_matrix_diagonal(robin_scaler);
 
     SparsityPattern spattern(dh.n_dofs(), dh.n_dofs(), dh.n_dofs());
     for (unsigned int i = 0; i < dh.n_dofs(); ++i)
@@ -444,9 +472,8 @@ public:
     Vector<double> localized_neumann_nodes(neumann_nodes);
     Vector<double> localized_robin_nodes(robin_nodes);
     Vector<double> localized_alpha(alpha);
-    Vector<double> localized_robin_matrix_diagonal(robin_matrix_diagonal);
-    Vector<double> localized_robin_matrix_diagonal_imag(
-      robin_matrix_diagonal_imag);
+    Vector<double> localized_robin_matrix_diagonal(robin_scaler);
+    Vector<double> localized_robin_matrix_diagonal_imag(robin_scaler_imag);
 
     SparsityPattern spattern(dh.n_dofs(), dh.n_dofs(), dh.n_dofs());
     for (unsigned int i = 0; i < dh.n_dofs(); ++i)
@@ -578,19 +605,27 @@ public:
   TrilinosWrappers::SparseMatrix    dirichlet_matrix;
   // handles robin conditions such as
   // coeffs[i, 0] * phi + coeffs[i, 1] * dphi_dn = coeffs[i, 2]
-  TrilinosWrappers::MPI::Vector robin_matrix_diagonal,
-    robin_matrix_diagonal_imag;
+  TrilinosWrappers::MPI::Vector robin_scaler, robin_scaler_imag;
   TrilinosWrappers::MPI::Vector robin_rhs, robin_rhs_imag;
+  // handles linearized pressure conditions such as
+  // coeffs[i, 0] * d^2_phi_dx^2 + coeffs[i, 1] * dphi_dn = coeffs[i, 2]
+  // expected that coeffs[i] = (U^2 / g, 1, 0)
+  TrilinosWrappers::MPI::Vector     freesurface_scaler, freesurface_scaler_imag;
+  TrilinosWrappers::MPI::Vector     freesurface_rhs, freesurface_rhs_imag;
+  TrilinosWrappers::PreconditionILU freesurface_mass_preconditioner;
+  TrilinosWrappers::SparseMatrix    freesurface_mass_matrix;
+  TrilinosWrappers::SparseMatrix    freesurface_df_dx_matrix;
+  // TrilinosWrappers::SparseMatrix    freesurface_d2f_dx2_matrix;
 
-  TrilinosWrappers::MPI::Vector system_rhs; //, system_rhs_imag;
-
-  TrilinosWrappers::MPI::Vector      sol;
+  TrilinosWrappers::MPI::Vector      sol, system_rhs;
   TrilinosWrappers::MPI::BlockVector sol_blocked, system_rhs_blocked;
   TrilinosWrappers::MPI::Vector      alpha;
 
   mutable TrilinosWrappers::MPI::Vector serv_phi, serv_phi_imag;
   mutable TrilinosWrappers::MPI::Vector serv_dphi_dn, serv_dphi_dn_imag;
   mutable TrilinosWrappers::MPI::Vector serv_phi_robin, serv_phi_robin_imag;
+  mutable TrilinosWrappers::MPI::Vector serv_phi_freesurface,
+    serv_phi_freesurface_imag;
 
   AffineConstraints<double> constraints, constraints_imag;
 
@@ -628,9 +663,11 @@ public:
   /// for Neumann nodes
   TrilinosWrappers::MPI::Vector neumann_nodes;
   TrilinosWrappers::MPI::Vector robin_nodes;
+  TrilinosWrappers::MPI::Vector freesurface_nodes;
   TrilinosWrappers::MPI::Vector dirichlet_flags;
   TrilinosWrappers::MPI::Vector neumann_flags;
   TrilinosWrappers::MPI::Vector robin_flags;
+  TrilinosWrappers::MPI::Vector freesurface_flags;
 
   /// The IndexSet for the problem without considering any ghost element for the
   /// scalar FE

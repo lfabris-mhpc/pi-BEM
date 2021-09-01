@@ -108,13 +108,16 @@ ComputationalDomain<dim>::declare_parameters(ParameterHandler &prm)
   prm.enter_subsection("Boundary Conditions ID Numbers");
   {
     prm.declare_entry("Dirichlet boundary ids",
-                      "0,110,110",
+                      "",
                       Patterns::List(Patterns::Integer(0)));
     prm.declare_entry("Neumann boundary ids",
-                      "1",
+                      "",
                       Patterns::List(Patterns::Integer(0)));
     prm.declare_entry("Robin boundary ids",
-                      "2",
+                      "",
+                      Patterns::List(Patterns::Integer(0)));
+    prm.declare_entry("Free surface boundary ids",
+                      "",
                       Patterns::List(Patterns::Integer(0)));
     prm.declare_entry(
       "Manifold to boundary slot map",
@@ -218,6 +221,40 @@ ComputationalDomain<dim>::parse_parameters(ParameterHandler &prm)
           BoundaryConditionType::robin;
       }
 
+    std::vector<std::string> freesurface_string_list =
+      Utilities::split_string_list(prm.get("Free surface boundary ids"));
+    freesurface_boundary_ids.resize(freesurface_string_list.size());
+    for (unsigned int i = 0; i < freesurface_string_list.size(); ++i)
+      {
+        std::istringstream reader(freesurface_string_list[i]);
+        reader >> freesurface_boundary_ids[i];
+
+        auto find = std::find(dirichlet_boundary_ids.begin(),
+                              dirichlet_boundary_ids.end(),
+                              freesurface_boundary_ids[i]);
+        AssertThrow(
+          find == dirichlet_boundary_ids.end(),
+          ExcMessage(
+            "Found overlap between Dirichlet boundary ids and free surface's"));
+        find = std::find(neumann_boundary_ids.begin(),
+                         neumann_boundary_ids.end(),
+                         freesurface_boundary_ids[i]);
+        AssertThrow(
+          find == neumann_boundary_ids.end(),
+          ExcMessage(
+            "Found overlap between Neumann boundary ids and free surface's"));
+        find = std::find(robin_boundary_ids.begin(),
+                         robin_boundary_ids.end(),
+                         freesurface_boundary_ids[i]);
+        AssertThrow(
+          find == robin_boundary_ids.end(),
+          ExcMessage(
+            "Found overlap between Robin boundary ids and free surface's"));
+
+        manifold2bcondition_map[freesurface_boundary_ids[i]] =
+          BoundaryConditionType::freesurface;
+      }
+
     manifold2bcondition_slot_map.clear();
     std::vector<std::string> slots_string_list =
       Utilities::split_string_list(prm.get("Manifold to boundary slot map"));
@@ -249,6 +286,9 @@ ComputationalDomain<dim>::parse_parameters(ParameterHandler &prm)
             break;
           case BoundaryConditionType::robin:
             pcout << "robin";
+            break;
+          case BoundaryConditionType::freesurface:
+            pcout << "free surface";
             break;
           case BoundaryConditionType::invalid:
           default:
@@ -788,7 +828,7 @@ ComputationalDomain<3>::refine_and_resize_by_aspect_ratio()
 
 template <>
 void
-ComputationalDomain<2>::refine_and_resize_by_cad_projections(double max_tol)
+ComputationalDomain<2>::refine_and_resize_by_cad_projections(double)
 {
   AssertThrow(
     false,

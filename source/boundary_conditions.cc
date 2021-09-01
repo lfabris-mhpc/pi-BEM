@@ -68,9 +68,13 @@ BoundaryConditions<dim>::declare_parameters(ParameterHandler &prm)
 
   std::vector<std::string> bcond_names = {"Potential",
                                           "Wind function",
-                                          "Robin coefficients"};
-  std::vector<std::string> defaults_2d = {"x+y", "1; 1", "1; -1; 0"};
-  std::vector<std::string> defaults_3d = {"x+y+z", "1; 1; 1", "0; 0; 0"};
+                                          "Robin coefficients",
+                                          "Free surface coefficients"};
+  std::vector<std::string> defaults_2d = {"x+y", "1; 1", "1; -1", "1; -1"};
+  std::vector<std::string> defaults_3d = {"x+y+z",
+                                          "1; 1; 1",
+                                          "0; 0; 0",
+                                          "0; 0; 0"};
 
   for (unsigned int d = 0; d < 2; ++d)
     {
@@ -102,17 +106,19 @@ BoundaryConditions<dim>::declare_parameters(ParameterHandler &prm)
                     }
                   else
                     {
-                      // other are vectors
+                      // every other outputs a vector
                       if (!d)
                         {
                           Functions::ParsedFunction<2>::declare_parameters(prm,
-                                                                           d);
+                                                                           d +
+                                                                             2);
                           prm.set("Function expression", defaults_2d[cond]);
                         }
                       else
                         {
                           Functions::ParsedFunction<3>::declare_parameters(prm,
-                                                                           d);
+                                                                           d +
+                                                                             2);
                           prm.set("Function expression", defaults_3d[cond]);
                         }
                     }
@@ -131,7 +137,8 @@ BoundaryConditions<dim>::parse_parameters(ParameterHandler &prm)
 
   std::vector<std::string> bcond_names = {"Potential",
                                           "Wind function",
-                                          "Robin coefficients"};
+                                          "Robin coefficients",
+                                          "Free surface coefficients"};
 
   for (unsigned int comp = 0; comp < n_components; ++comp)
     {
@@ -163,6 +170,12 @@ BoundaryConditions<dim>::parse_parameters(ParameterHandler &prm)
                       new Functions::ParsedFunction<dim>(dim));
                     robin_coeffs[pos]->parse_parameters(prm);
                     break;
+                  case BoundaryConditionType::freesurface:
+                    // TODO: decide what shape has freesurface coefficients
+                    freesurface_coeffs[pos].reset(
+                      new Functions::ParsedFunction<dim>(dim));
+                    freesurface_coeffs[pos]->parse_parameters(prm);
+                    break;
                   case BoundaryConditionType::invalid:
                   default:
                     break;
@@ -182,6 +195,7 @@ BoundaryConditions<dim>::solve_problem(bool reset_matrix)
       get_potential(current_component, i).set_time(0);
       get_wind(current_component, i).set_time(0);
       get_robin_coeffs(current_component, i).set_time(0);
+      get_freesurface_coeffs(current_component, i).set_time(0);
     }
 
   const types::global_dof_index    n_dofs = bem.dh.n_dofs();
@@ -194,16 +208,26 @@ BoundaryConditions<dim>::solve_problem(bool reset_matrix)
   get_phi().reinit(this_cpu_set, mpi_communicator);
   get_dphi_dn().reinit(this_cpu_set, mpi_communicator);
   tmp_rhs.reinit(this_cpu_set, mpi_communicator);
-  bem.robin_matrix_diagonal.reinit(this_cpu_set, mpi_communicator);
+  bem.robin_scaler.reinit(this_cpu_set, mpi_communicator);
   bem.robin_rhs.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_scaler.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_rhs.reinit(this_cpu_set, mpi_communicator);
 
-  pcout << "Computing normal vector" << std::endl;
   if (reset_matrix)
     {
+      pcout << "Computing normal vector" << std::endl;
       bem.compute_normals();
     }
   prepare_bem_vectors(tmp_rhs);
-  prepare_robin_datastructs(bem.robin_matrix_diagonal, bem.robin_rhs);
+  if (!comp_dom.robin_boundary_ids.empty())
+    {
+      prepare_robin_datastructs(bem.robin_scaler, bem.robin_rhs);
+    }
+  if (!comp_dom.freesurface_boundary_ids.empty())
+    {
+      prepare_freesurface_datastructs(bem.freesurface_scaler,
+                                      bem.freesurface_rhs);
+    }
 
   bem.solve(get_phi(), get_dphi_dn(), tmp_rhs, reset_matrix);
 
@@ -256,15 +280,19 @@ BoundaryConditions<dim>::solve_complex_problem(bool reset_matrix)
   get_phi().reinit(this_cpu_set, mpi_communicator);
   get_dphi_dn().reinit(this_cpu_set, mpi_communicator);
   tmp_rhs.reinit(this_cpu_set, mpi_communicator);
-  bem.robin_matrix_diagonal.reinit(this_cpu_set, mpi_communicator);
+  bem.robin_scaler.reinit(this_cpu_set, mpi_communicator);
   bem.robin_rhs.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_scaler.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_rhs.reinit(this_cpu_set, mpi_communicator);
   // imaginary parts - next component
   get_phi(current_component + 1).reinit(this_cpu_set, mpi_communicator);
   get_dphi_dn(current_component + 1).reinit(this_cpu_set, mpi_communicator);
   TrilinosWrappers::MPI::Vector tmp_rhs_imag;
   tmp_rhs_imag.reinit(this_cpu_set, mpi_communicator);
-  bem.robin_matrix_diagonal_imag.reinit(this_cpu_set, mpi_communicator);
+  bem.robin_scaler_imag.reinit(this_cpu_set, mpi_communicator);
   bem.robin_rhs_imag.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_scaler_imag.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_rhs_imag.reinit(this_cpu_set, mpi_communicator);
 
   if (reset_matrix)
     {
@@ -280,10 +308,20 @@ BoundaryConditions<dim>::solve_complex_problem(bool reset_matrix)
   prepare_bem_vectors(tmp_rhs_imag);
   set_current_phi_component(current_component - 1);
 
-  prepare_robin_datastructs(bem.robin_matrix_diagonal,
-                            bem.robin_matrix_diagonal_imag,
-                            bem.robin_rhs,
-                            bem.robin_rhs_imag);
+  if (!comp_dom.robin_boundary_ids.empty())
+    {
+      prepare_robin_datastructs(bem.robin_scaler,
+                                bem.robin_scaler_imag,
+                                bem.robin_rhs,
+                                bem.robin_rhs_imag);
+    }
+  if (!comp_dom.freesurface_boundary_ids.empty())
+    {
+      prepare_freesurface_datastructs(bem.freesurface_scaler,
+                                      bem.freesurface_scaler_imag,
+                                      bem.freesurface_rhs,
+                                      bem.freesurface_rhs_imag);
+    }
 
   bem.solve(get_phi(),
             get_phi(current_component + 1),
@@ -440,7 +478,7 @@ BoundaryConditions<dim>::prepare_bem_vectors(TrilinosWrappers::MPI::Vector &rhs)
 template <int dim>
 void
 BoundaryConditions<dim>::prepare_robin_datastructs(
-  TrilinosWrappers::MPI::Vector &robin_matrix_diagonal,
+  TrilinosWrappers::MPI::Vector &robin_scaler,
   TrilinosWrappers::MPI::Vector &robin_rhs)
 {
   Teuchos::TimeMonitor LocalTimer(*PrepareTime);
@@ -464,20 +502,18 @@ BoundaryConditions<dim>::prepare_robin_datastructs(
           auto slot =
             comp_dom.manifold2bcondition_slot_map[cell->manifold_id()];
           cell->get_dof_indices(local_dof_indices);
-          for (unsigned int j = 0; j < dofs_per_cell; ++j)
+          for (auto j : local_dof_indices)
             {
-              if (this_cpu_set.is_element(local_dof_indices[j]) &&
-                  !processed.count(local_dof_indices[j]))
+              if (this_cpu_set.is_element(j) && !processed.count(j))
                 {
                   // evaluate robin coefficients
                   // coeffs(0) * phi + coeffs(1) * dphi_dn = coeffs(2)
                   get_robin_coeffs(current_component, slot)
-                    .vector_value(support_points[local_dof_indices[j]], coeffs);
-                  robin_matrix_diagonal(local_dof_indices[j]) =
-                    coeffs(0) / coeffs(1);
-                  robin_rhs(local_dof_indices[j]) = coeffs(2) / coeffs(1);
+                    .vector_value(support_points[j], coeffs);
+                  robin_scaler(j) = coeffs(0) / coeffs(1);
+                  robin_rhs(j)    = coeffs(2) / coeffs(1);
 
-                  processed.insert(local_dof_indices[j]);
+                  processed.insert(j);
                 }
             }
         }
@@ -487,8 +523,8 @@ BoundaryConditions<dim>::prepare_robin_datastructs(
 template <int dim>
 void
 BoundaryConditions<dim>::prepare_robin_datastructs(
-  TrilinosWrappers::MPI::Vector &robin_matrix_diagonal,
-  TrilinosWrappers::MPI::Vector &robin_matrix_diagonal_imag,
+  TrilinosWrappers::MPI::Vector &robin_scaler,
+  TrilinosWrappers::MPI::Vector &robin_scaler_imag,
   TrilinosWrappers::MPI::Vector &robin_rhs,
   TrilinosWrappers::MPI::Vector &robin_rhs_imag)
 {
@@ -514,18 +550,16 @@ BoundaryConditions<dim>::prepare_robin_datastructs(
           auto slot =
             comp_dom.manifold2bcondition_slot_map[cell->manifold_id()];
           cell->get_dof_indices(local_dof_indices);
-          for (unsigned int j = 0; j < dofs_per_cell; ++j)
+          for (auto j : local_dof_indices)
             {
-              if (this_cpu_set.is_element(local_dof_indices[j]) &&
-                  !processed.count(local_dof_indices[j]))
+              if (this_cpu_set.is_element(j) && !processed.count(j))
                 {
                   // evaluate robin coefficients
                   // coeffs(0) * phi + coeffs(1) * dphi_dn = coeffs(2)
                   get_robin_coeffs(current_component, slot)
-                    .vector_value(support_points[local_dof_indices[j]], coeffs);
+                    .vector_value(support_points[j], coeffs);
                   get_robin_coeffs(current_component + 1, slot)
-                    .vector_value(support_points[local_dof_indices[j]],
-                                  coeffs_imag);
+                    .vector_value(support_points[j], coeffs_imag);
                   std::complex<double> c0(coeffs(0), coeffs_imag(0));
                   std::complex<double> c1(coeffs(1), coeffs_imag(1));
                   std::complex<double> c2(coeffs(2), coeffs_imag(2));
@@ -533,13 +567,117 @@ BoundaryConditions<dim>::prepare_robin_datastructs(
                   std::complex<double> diag = c0 / c1;
                   std::complex<double> rhs  = c2 / c1;
 
-                  robin_matrix_diagonal(local_dof_indices[j]) = std::real(diag);
-                  robin_matrix_diagonal_imag(local_dof_indices[j]) =
-                    std::imag(diag);
-                  robin_rhs(local_dof_indices[j])      = std::real(rhs);
-                  robin_rhs_imag(local_dof_indices[j]) = std::imag(rhs);
+                  robin_scaler(j)      = std::real(diag);
+                  robin_scaler_imag(j) = std::imag(diag);
+                  robin_rhs(j)         = std::real(rhs);
+                  robin_rhs_imag(j)    = std::imag(rhs);
 
-                  processed.insert(local_dof_indices[j]);
+                  processed.insert(j);
+                }
+            }
+        }
+    }
+}
+
+
+template <int dim>
+void
+BoundaryConditions<dim>::prepare_freesurface_datastructs(
+  TrilinosWrappers::MPI::Vector &freesurface_scaler,
+  TrilinosWrappers::MPI::Vector &freesurface_rhs)
+{
+  Teuchos::TimeMonitor LocalTimer(*PrepareTime);
+
+  const types::global_dof_index n_dofs = bem.dh.n_dofs();
+  std::vector<Point<dim>>       support_points(n_dofs);
+  DoFTools::map_dofs_to_support_points<dim - 1, dim>(*bem.mapping,
+                                                     bem.dh,
+                                                     support_points);
+
+  const unsigned int                   dofs_per_cell = bem.fe->dofs_per_cell;
+  std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
+
+  Vector<double>                    coeffs(3);
+  std::set<types::global_dof_index> processed;
+  for (const auto &cell : bem.dh.active_cell_iterators())
+    {
+      if (comp_dom.manifold2bcondition_map[cell->manifold_id()] ==
+          BoundaryConditionType::freesurface)
+        {
+          auto slot =
+            comp_dom.manifold2bcondition_slot_map[cell->manifold_id()];
+          cell->get_dof_indices(local_dof_indices);
+          for (auto j : local_dof_indices)
+            {
+              if (this_cpu_set.is_element(j) && !processed.count(j))
+                {
+                  // evaluate freesurface coefficients
+                  // coeffs(0) * phi + coeffs(1) * dphi_dn = coeffs(2)
+                  get_freesurface_coeffs(current_component, slot)
+                    .vector_value(support_points[j], coeffs);
+                  freesurface_scaler(j) = coeffs(0) / coeffs(1);
+                  freesurface_rhs(j)    = coeffs(2) / coeffs(1);
+
+                  processed.insert(j);
+                }
+            }
+        }
+    }
+}
+
+template <int dim>
+void
+BoundaryConditions<dim>::prepare_freesurface_datastructs(
+  TrilinosWrappers::MPI::Vector &freesurface_scaler,
+  TrilinosWrappers::MPI::Vector &freesurface_scaler_imag,
+  TrilinosWrappers::MPI::Vector &freesurface_rhs,
+  TrilinosWrappers::MPI::Vector &freesurface_rhs_imag)
+{
+  Teuchos::TimeMonitor LocalTimer(*PrepareTime);
+
+  const types::global_dof_index n_dofs = bem.dh.n_dofs();
+  std::vector<Point<dim>>       support_points(n_dofs);
+  DoFTools::map_dofs_to_support_points<dim - 1, dim>(*bem.mapping,
+                                                     bem.dh,
+                                                     support_points);
+
+  const unsigned int                   dofs_per_cell = bem.fe->dofs_per_cell;
+  std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
+
+  Vector<double>                    coeffs(3);
+  Vector<double>                    coeffs_imag(3);
+  std::set<types::global_dof_index> processed;
+  for (const auto &cell : bem.dh.active_cell_iterators())
+    {
+      if (comp_dom.manifold2bcondition_map[cell->manifold_id()] ==
+          BoundaryConditionType::freesurface)
+        {
+          auto slot =
+            comp_dom.manifold2bcondition_slot_map[cell->manifold_id()];
+          cell->get_dof_indices(local_dof_indices);
+          for (auto j : local_dof_indices)
+            {
+              if (this_cpu_set.is_element(j) && !processed.count(j))
+                {
+                  // evaluate freesurface coefficients
+                  // coeffs(0) * phi + coeffs(1) * dphi_dn = coeffs(2)
+                  get_freesurface_coeffs(current_component, slot)
+                    .vector_value(support_points[j], coeffs);
+                  get_freesurface_coeffs(current_component + 1, slot)
+                    .vector_value(support_points[j], coeffs_imag);
+                  std::complex<double> c0(coeffs(0), coeffs_imag(0));
+                  std::complex<double> c1(coeffs(1), coeffs_imag(1));
+                  std::complex<double> c2(coeffs(2), coeffs_imag(2));
+
+                  std::complex<double> diag = c0 / c1;
+                  std::complex<double> rhs  = c2 / c1;
+
+                  freesurface_scaler(j)      = std::real(diag);
+                  freesurface_scaler_imag(j) = std::imag(diag);
+                  freesurface_rhs(j)         = std::real(rhs);
+                  freesurface_rhs_imag(j)    = std::imag(rhs);
+
+                  processed.insert(j);
                 }
             }
         }

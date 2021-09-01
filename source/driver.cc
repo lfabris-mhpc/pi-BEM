@@ -40,7 +40,6 @@ template <int dim>
 void
 Driver<dim>::declare_parameters(ParameterHandler &prm)
 {
-  pcout << "Driver::declare_parameters" << std::endl;
   prm.declare_entry("Set Global Refinement", "true", Patterns::Bool());
   prm.declare_entry("Potential components", "1", Patterns::Integer());
   prm.declare_entry(
@@ -190,6 +189,7 @@ Driver<dim>::run()
             boundary_conditions.output_results(filename);
           }
       }
+
     boundary_conditions.set_current_phi_component(0);
 
     /* sample output using the norm vectors
