@@ -615,7 +615,6 @@ public:
   TrilinosWrappers::PreconditionILU freesurface_mass_preconditioner;
   TrilinosWrappers::SparseMatrix    freesurface_mass_matrix;
   TrilinosWrappers::SparseMatrix    freesurface_df_dx_matrix;
-  // TrilinosWrappers::SparseMatrix    freesurface_d2f_dx2_matrix;
 
   TrilinosWrappers::MPI::Vector      sol, system_rhs;
   TrilinosWrappers::MPI::BlockVector sol_blocked, system_rhs_blocked;

@@ -319,14 +319,16 @@ BEMProblem<dim>::reinit()
 
       freesurface_mass_matrix.reinit(mass_sparsity_pattern);
       freesurface_df_dx_matrix.reinit(mass_sparsity_pattern);
-      // freesurface_d2f_dx2_matrix.reinit(mass_sparsity_pattern);
+
+      freesurface_mass_matrix  = 0;
+      freesurface_df_dx_matrix = 0;
 
       std::vector<types::global_dof_index> cell_dofs(fe->dofs_per_cell);
       FEValues<dim - 1, dim>               fe_v(*mapping,
                                   *fe,
                                   *quadrature,
                                   update_values | update_gradients |
-                                    update_hessians | update_normal_vectors |
+                                    update_normal_vectors |
                                     update_quadrature_points |
                                     update_JxW_values);
 
@@ -359,6 +361,7 @@ BEMProblem<dim>::reinit()
             {
               delta = std::abs(d1 * dir);
             }
+          delta = 0;
 
           for (unsigned int ci = 0; ci < cell_dofs.size(); ++ci)
             {
@@ -383,9 +386,28 @@ BEMProblem<dim>::reinit()
                             i, j, shape_i * shape_j * fe_v.JxW(cq));
                           freesurface_df_dx_matrix.add(
                             i, j, shape_i * shape_grad_j * dir * fe_v.JxW(cq));
-                          // freesurface_d2f_dx2_matrix.add(i, j,
-                          //   shape_i * fe_v.shape_hessian(cj, cq)[{0, 0}] *
-                          //   fe_v.JxW(cq));
+
+                          // if (!std::isfinite(freesurface_mass_matrix(i, j))
+                          // ||
+                          //     std::isnan(freesurface_mass_matrix(i, j)))
+                          //   {
+                          //     std::cout << "rank " << this_mpi_process
+                          //               << " : not finite or nan value @ pos
+                          //               "
+                          //               << i << ", " << j
+                          //               << " in fs mass matrix" << std::endl;
+                          //   }
+                          // if (!std::isfinite(freesurface_df_dx_matrix(i, j))
+                          // ||
+                          //     std::isnan(freesurface_df_dx_matrix(i, j)))
+                          //   {
+                          //     std::cout << "rank " << this_mpi_process
+                          //               << " : not finite or nan value @ pos
+                          //               "
+                          //               << i << ", " << j
+                          //               << " in fs deriv matrix" <<
+                          //               std::endl;
+                          //   }
                         }
                     }
                 }
@@ -394,7 +416,6 @@ BEMProblem<dim>::reinit()
 
       freesurface_mass_matrix.compress(VectorOperation::insert);
       freesurface_df_dx_matrix.compress(VectorOperation::insert);
-      // freesurface_d2f_dx2_matrix.compress(VectorOperation::insert);
 
       freesurface_mass_preconditioner.clear();
       freesurface_mass_preconditioner.initialize(freesurface_mass_matrix);
@@ -1619,8 +1640,11 @@ BEMProblem<dim>::freesurface_phi_to_d2phi_dx2_v1(
   TrilinosWrappers::MPI::Vector &      dphi_dn_freesurface,
   const TrilinosWrappers::MPI::Vector &phi_freesurface) const
 {
-  TrilinosWrappers::MPI::Vector tmp;
-  tmp.reinit(phi_freesurface, false);
+  static TrilinosWrappers::MPI::Vector tmp(this_cpu_set, mpi_communicator);
+  if (tmp.size() != phi_freesurface.size())
+    {
+      tmp.reinit(this_cpu_set, mpi_communicator);
+    }
 
   // the final result will initialize dphi_dn_freesurface such that:
   // freesurface_mass_matrix * dphi_dn_freesurface = freesurface_coeffs *
@@ -1631,7 +1655,6 @@ BEMProblem<dim>::freesurface_phi_to_d2phi_dx2_v1(
   freesurface_df_dx_matrix.vmult(tmp, phi_freesurface);
 
   // dphi_dn_freesurface = freesurface_mass_matrix^-1 * tmp
-  // TODO: move preconditioner inside reinit
   SolverControl                           controller0;
   SolverCG<TrilinosWrappers::MPI::Vector> solver0(controller0);
 
@@ -1639,6 +1662,13 @@ BEMProblem<dim>::freesurface_phi_to_d2phi_dx2_v1(
                 dphi_dn_freesurface,
                 tmp,
                 freesurface_mass_preconditioner);
+
+  // pcout << "    first solve took " << controller0.last_step() << " steps"
+  //       << std::endl;
+  // pcout << "    first solve last value " << controller0.last_value()
+  //       << std::endl;
+
+  // AssertThrow(false, ExcMessage("stop"));
 
   // tmp = freesurface_df_dx_matrix * dphi_dn_freesurface
   freesurface_df_dx_matrix.vmult(tmp, dphi_dn_freesurface);
@@ -1651,6 +1681,11 @@ BEMProblem<dim>::freesurface_phi_to_d2phi_dx2_v1(
                 dphi_dn_freesurface,
                 tmp,
                 freesurface_mass_preconditioner);
+
+  // pcout << "    second solve took " << controller1.last_step() << " steps"
+  //       << std::endl;
+  // pcout << "    second solve last value " << controller1.last_value()
+  //       << std::endl;
 }
 
 template <int dim>
@@ -1704,6 +1739,10 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
 
       serv_phi += serv_phi_freesurface;
       // override serv_phi_robin, used as a tmp
+      if (serv_phi_robin.size() != serv_phi_freesurface.size())
+        {
+          serv_phi_robin.reinit(serv_phi_freesurface, false);
+        }
       freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
       serv_phi_robin.scale(freesurface_scaler);
       serv_dphi_dn -= serv_phi_robin;
@@ -1831,7 +1870,15 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
       serv_phi_imag += serv_phi_freesurface_imag;
 
       // override serv_phi_robin, used as a tmp
+      if (serv_phi_robin.size() != serv_phi_freesurface.size())
+        {
+          serv_phi_robin.reinit(serv_phi_freesurface, false);
+        }
       freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
+      if (serv_phi_robin_imag.size() != serv_phi_freesurface.size())
+        {
+          serv_phi_robin_imag.reinit(serv_phi_freesurface_imag, false);
+        }
       freesurface_phi_to_d2phi_dx2(serv_phi_robin_imag,
                                    serv_phi_freesurface_imag);
       tmp = serv_phi_robin;
@@ -2108,7 +2155,6 @@ BEMProblem<dim>::solve_system(TrilinosWrappers::MPI::Vector &      phi,
 
   compute_alpha();
   compute_rhs(system_rhs, tmp_rhs);
-
   compute_constraints(constr_cpu_set, constraints, tmp_rhs);
   ConstrainedOperator<TrilinosWrappers::MPI::Vector, BEMProblem<dim>> cc(
     *this, constraints, constr_cpu_set, mpi_communicator);
@@ -2162,6 +2208,10 @@ BEMProblem<dim>::solve_system(TrilinosWrappers::MPI::Vector &      phi,
       serv_phi_freesurface = sol;
       serv_phi_freesurface.scale(freesurface_nodes);
 
+      if (serv_phi_robin.size() != serv_phi_freesurface.size())
+        {
+          serv_phi_robin.reinit(serv_phi_freesurface, false);
+        }
       freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
       serv_phi_robin.scale(freesurface_scaler);
       serv_phi_robin.sadd(-1, freesurface_rhs);
@@ -2285,7 +2335,15 @@ BEMProblem<dim>::solve_system(TrilinosWrappers::MPI::Vector &      phi,
       serv_phi_freesurface_imag.scale(freesurface_nodes);
 
       // override serv_phi_robin, used as a tmp
+      if (serv_phi_robin.size() != serv_phi_freesurface.size())
+        {
+          serv_phi_robin.reinit(serv_phi_freesurface, false);
+        }
       freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
+      if (serv_phi_robin_imag.size() != serv_phi_freesurface_imag.size())
+        {
+          serv_phi_robin_imag.reinit(serv_phi_freesurface_imag, false);
+        }
       freesurface_phi_to_d2phi_dx2(serv_phi_robin_imag,
                                    serv_phi_freesurface_imag);
       // TODO: temporary, is there anything else to be recycled?

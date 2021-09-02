@@ -219,6 +219,7 @@ BoundaryConditions<dim>::solve_problem(bool reset_matrix)
       bem.compute_normals();
     }
   prepare_bem_vectors(tmp_rhs);
+
   if (!comp_dom.robin_boundary_ids.empty())
     {
       prepare_robin_datastructs(bem.robin_scaler, bem.robin_rhs);
@@ -615,6 +616,9 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
                   // coeffs(0) * phi + coeffs(1) * dphi_dn = coeffs(2)
                   get_freesurface_coeffs(current_component, slot)
                     .vector_value(support_points[j], coeffs);
+                  AssertThrow(coeffs(1) != 0,
+                              ExcMessage(
+                                "The middle coefficient cannot be zero"));
                   freesurface_scaler(j) = coeffs(0) / coeffs(1);
                   freesurface_rhs(j)    = coeffs(2) / coeffs(1);
 
@@ -660,7 +664,7 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
               if (this_cpu_set.is_element(j) && !processed.count(j))
                 {
                   // evaluate freesurface coefficients
-                  // coeffs(0) * phi + coeffs(1) * dphi_dn = coeffs(2)
+                  // coeffs(0) * d2_phi_dx2 + coeffs(1) * dphi_dn = coeffs(2)
                   get_freesurface_coeffs(current_component, slot)
                     .vector_value(support_points[j], coeffs);
                   get_freesurface_coeffs(current_component + 1, slot)
@@ -668,6 +672,10 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
                   std::complex<double> c0(coeffs(0), coeffs_imag(0));
                   std::complex<double> c1(coeffs(1), coeffs_imag(1));
                   std::complex<double> c2(coeffs(2), coeffs_imag(2));
+
+                  AssertThrow(c1 != 0,
+                              ExcMessage(
+                                "The middle coefficient cannot be zero"));
 
                   std::complex<double> diag = c0 / c1;
                   std::complex<double> rhs  = c2 / c1;
