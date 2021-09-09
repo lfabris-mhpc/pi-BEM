@@ -337,31 +337,19 @@ BEMProblem<dim>::reinit()
           fe_v.reinit(cell);
           cell->get_dof_indices(cell_dofs);
 
-          // TODO: how to adapt this to the actual/previous computed streamline
-          // direction?
+          // where to get the v from?
           Tensor<1, dim> dir;
-          dir[0] = 1;
+          dir[0] = -1;
           dir /= dir.norm();
 
-          // const double delta =
-          //   compute_stabilization_delta(cell->diameter(), 0, dir,
-          //   fe->degree);
-          // TODO: compute the cell's dimension along the streamline direction,
-          // or is it instead taking the
+          // this is for square cells
           double delta = 1 / std::sqrt(2);
-          auto   d0    = cell->vertex(1) - cell->vertex(0);
-          auto   d1    = cell->vertex(2) - cell->vertex(0);
-          // d0 /= d0.norm();
-          // d1 /= d1.norm();
-          if (std::abs(d0 / d0.norm() * dir) > std::abs(d1 / d1.norm() * dir))
-            {
-              delta = std::abs(d0 * dir);
-            }
-          else
-            {
-              delta = std::abs(d1 * dir);
-            }
-          delta = 0;
+          // the two cell's diagonals
+          auto d0 = cell->vertex(3) - cell->vertex(0);
+          auto d1 = cell->vertex(2) - cell->vertex(1);
+          // the least of projected diagonals on the
+          // stream dir
+          delta = std::min(std::abs(d0 * dir), std::abs(d1 * dir));
 
           for (unsigned int ci = 0; ci < cell_dofs.size(); ++ci)
             {
@@ -370,44 +358,23 @@ BEMProblem<dim>::reinit()
                 {
                   for (unsigned int cq = 0; cq < fe_v.n_quadrature_points; ++cq)
                     {
-                      auto shape_i = fe_v.shape_value(ci, cq);
+                      auto shape_i      = fe_v.shape_value(ci, cq);
+                      auto shape_grad_i = fe_v.shape_grad(ci, cq);
+
+                      auto supg_i = shape_i + delta * shape_grad_i * dir;
+
                       for (unsigned int cj = 0; cj < cell_dofs.size(); ++cj)
                         {
                           auto j            = cell_dofs[cj];
                           auto shape_j      = fe_v.shape_value(cj, cq);
                           auto shape_grad_j = fe_v.shape_grad(cj, cq);
-                          // the idea is to evaluate the shape function with a
-                          // contribution taken from the streamline
-                          shape_j *= 1 + delta * shape_grad_j * dir;
-                          shape_grad_j *= 1 + delta * shape_grad_j * dir;
 
-                          // TODO: implement the SUPG
+                          auto supg_j = shape_j + delta * shape_grad_j * dir;
+
                           freesurface_mass_matrix.add(
-                            i, j, shape_i * shape_j * fe_v.JxW(cq));
+                            i, j, supg_i * supg_j * fe_v.JxW(cq));
                           freesurface_df_dx_matrix.add(
-                            i, j, shape_i * shape_grad_j * dir * fe_v.JxW(cq));
-
-                          // if (!std::isfinite(freesurface_mass_matrix(i, j))
-                          // ||
-                          //     std::isnan(freesurface_mass_matrix(i, j)))
-                          //   {
-                          //     std::cout << "rank " << this_mpi_process
-                          //               << " : not finite or nan value @ pos
-                          //               "
-                          //               << i << ", " << j
-                          //               << " in fs mass matrix" << std::endl;
-                          //   }
-                          // if (!std::isfinite(freesurface_df_dx_matrix(i, j))
-                          // ||
-                          //     std::isnan(freesurface_df_dx_matrix(i, j)))
-                          //   {
-                          //     std::cout << "rank " << this_mpi_process
-                          //               << " : not finite or nan value @ pos
-                          //               "
-                          //               << i << ", " << j
-                          //               << " in fs deriv matrix" <<
-                          //               std::endl;
-                          //   }
+                            i, j, supg_i * shape_grad_j * dir * fe_v.JxW(cq));
                         }
                     }
                 }
@@ -416,6 +383,19 @@ BEMProblem<dim>::reinit()
 
       freesurface_mass_matrix.compress(VectorOperation::insert);
       freesurface_df_dx_matrix.compress(VectorOperation::insert);
+
+      // pcout << "freesurface_mass_matrix frobenius_norm "
+      //       << freesurface_mass_matrix.frobenius_norm() << std::endl;
+      // pcout << "freesurface_mass_matrix l1_norm "
+      //       << freesurface_mass_matrix.l1_norm() << std::endl;
+      // pcout << "freesurface_mass_matrix linfty_norm "
+      //       << freesurface_mass_matrix.linfty_norm() << std::endl;
+      // pcout << "freesurface_df_dx_matrix frobenius_norm "
+      //       << freesurface_df_dx_matrix.frobenius_norm() << std::endl;
+      // pcout << "freesurface_df_dx_matrix l1_norm "
+      //       << freesurface_df_dx_matrix.l1_norm() << std::endl;
+      // pcout << "freesurface_df_dx_matrix linfty_norm "
+      //       << freesurface_df_dx_matrix.linfty_norm() << std::endl;
 
       freesurface_mass_preconditioner.clear();
       freesurface_mass_preconditioner.initialize(freesurface_mass_matrix);
@@ -431,16 +411,6 @@ BEMProblem<dim>::reinit()
                    singular_quadrature_order);
     }
 
-  /* TODO: unused
-  // We need a TrilinosWrappers::MPI::Vector to reinit the SparsityPattern for
-  // the parallel mass matrices.
-  TrilinosWrappers::MPI::Vector helper(vector_this_cpu_set, mpi_communicator);
-  IndexSet                      trial_index_set;
-  trial_index_set.clear();
-  trial_index_set =
-    DoFTools::dof_indices_with_subdomain_association(gradient_dh,
-                                                     this_mpi_process);
-  */
   // This is the only way we could create the SparsityPattern, through the
   // Epetramap of an existing vector.
   vector_sparsity_pattern.reinit(vector_this_cpu_set,
@@ -1626,18 +1596,8 @@ BEMProblem<dim>::compute_alpha()
 
 template <int dim>
 void
-BEMProblem<dim>::freesurface_phi_to_d2phi_dx2(
-  TrilinosWrappers::MPI::Vector &      dphi_dn_freesurface,
-  const TrilinosWrappers::MPI::Vector &phi_freesurface) const
-{
-  BEMProblem<dim>::freesurface_phi_to_d2phi_dx2_v1(dphi_dn_freesurface,
-                                                   phi_freesurface);
-}
-
-template <int dim>
-void
-BEMProblem<dim>::freesurface_phi_to_d2phi_dx2_v1(
-  TrilinosWrappers::MPI::Vector &      dphi_dn_freesurface,
+BEMProblem<dim>::freesurface_phi_to_dphi_dx(
+  TrilinosWrappers::MPI::Vector &      dphi_dx_freesurface,
   const TrilinosWrappers::MPI::Vector &phi_freesurface) const
 {
   static TrilinosWrappers::MPI::Vector tmp(this_cpu_set, mpi_communicator);
@@ -1653,49 +1613,111 @@ BEMProblem<dim>::freesurface_phi_to_d2phi_dx2_v1(
 
   // tmp = freesurface_df_dx_matrix * phi_freesurface
   freesurface_df_dx_matrix.vmult(tmp, phi_freesurface);
+  // pcout << "freesurface_df_dx_matrix * phi_freesurface mean "
+  //       << tmp.mean_value() * nfreesurface_dofs << std::endl;
 
   // dphi_dn_freesurface = freesurface_mass_matrix^-1 * tmp
-  SolverControl                           controller0;
-  SolverCG<TrilinosWrappers::MPI::Vector> solver0(controller0);
+  SolverControl                              controller0(solver_control);
+  SolverGMRES<TrilinosWrappers::MPI::Vector> solver0(
+    controller0,
+    SolverGMRES<TrilinosWrappers::MPI::Vector>::AdditionalData(1000));
 
   solver0.solve(freesurface_mass_matrix,
-                dphi_dn_freesurface,
+                dphi_dx_freesurface,
                 tmp,
                 freesurface_mass_preconditioner);
+  // pcout << "dphi_dx_freesurface mean "
+  //       << dphi_dn_freesurface.mean_value() * nfreesurface_dofs << std::endl;
 
   // pcout << "    first solve took " << controller0.last_step() << " steps"
   //       << std::endl;
   // pcout << "    first solve last value " << controller0.last_value()
   //       << std::endl;
-
-  // AssertThrow(false, ExcMessage("stop"));
-
-  // tmp = freesurface_df_dx_matrix * dphi_dn_freesurface
-  freesurface_df_dx_matrix.vmult(tmp, dphi_dn_freesurface);
-
-  // dphi_dn_freesurface = freesurface_mass_matrix^-1 * tmp
-  SolverControl                           controller1;
-  SolverCG<TrilinosWrappers::MPI::Vector> solver1(controller1);
-
-  solver1.solve(freesurface_mass_matrix,
-                dphi_dn_freesurface,
-                tmp,
-                freesurface_mass_preconditioner);
-
-  // pcout << "    second solve took " << controller1.last_step() << " steps"
-  //       << std::endl;
-  // pcout << "    second solve last value " << controller1.last_value()
-  //       << std::endl;
 }
 
 template <int dim>
 void
-BEMProblem<dim>::freesurface_phi_to_d2phi_dx2_v2(
-  TrilinosWrappers::MPI::Vector &,
-  const TrilinosWrappers::MPI::Vector &) const
+BEMProblem<dim>::freesurface_phi_to_d2phi_dx2(
+  TrilinosWrappers::MPI::Vector &      d2phi_dx2_freesurface,
+  const TrilinosWrappers::MPI::Vector &phi_freesurface) const
 {
-  AssertThrow(fe->degree > 1,
-              ExcMessage("Element order does not support second derivative"));
+  static TrilinosWrappers::MPI::Vector tmp(this_cpu_set, mpi_communicator);
+  if (tmp.size() != phi_freesurface.size())
+    {
+      tmp.reinit(this_cpu_set, mpi_communicator);
+    }
+
+  freesurface_phi_to_dphi_dx(tmp, phi_freesurface);
+  freesurface_phi_to_dphi_dx(d2phi_dx2_freesurface, tmp);
+
+  // static TrilinosWrappers::MPI::Vector tmp(this_cpu_set, mpi_communicator);
+  // if (tmp.size() != phi_freesurface.size())
+  //   {
+  //     tmp.reinit(this_cpu_set, mpi_communicator);
+  //   }
+
+  // unsigned int nfreesurface_dofs =
+  //   (unsigned int)(freesurface_nodes.mean_value() *
+  //   freesurface_nodes.size());
+  // pcout << "phi_freesurface mean "
+  //       << phi_freesurface.mean_value() * nfreesurface_dofs << std::endl;
+
+  // // the final result will initialize dphi_dn_freesurface such that:
+  // // freesurface_mass_matrix * dphi_dn_freesurface = freesurface_coeffs *
+  // // freesurface_df_dx_matrix * freesurface_mass_matrix^-1 *
+  // // freesurface_df_dx_matrix * phi_freesurface
+  // pcout << "starting tmp mean " << tmp.mean_value() * nfreesurface_dofs
+  //       << std::endl;
+
+  // // tmp = freesurface_df_dx_matrix * phi_freesurface
+  // freesurface_df_dx_matrix.vmult(tmp, phi_freesurface);
+  // pcout << "freesurface_df_dx_matrix * phi_freesurface mean "
+  //       << tmp.mean_value() * nfreesurface_dofs << std::endl;
+
+  // // dphi_dn_freesurface = freesurface_mass_matrix^-1 * tmp
+  // SolverControl controller0(solver_control);
+  // // SolverCG<TrilinosWrappers::MPI::Vector> solver0(controller0);
+  // SolverGMRES<TrilinosWrappers::MPI::Vector> solver0(
+  //   controller0,
+  //   SolverGMRES<TrilinosWrappers::MPI::Vector>::AdditionalData(1000));
+
+  // solver0.solve(freesurface_mass_matrix,
+  //               dphi_dn_freesurface,
+  //               tmp,
+  //               freesurface_mass_preconditioner);
+  // pcout << "dphi_dx_freesurface mean "
+  //       << dphi_dn_freesurface.mean_value() * nfreesurface_dofs << std::endl;
+
+  // // pcout << "    first solve took " << controller0.last_step() << " steps"
+  // //       << std::endl;
+  // // pcout << "    first solve last value " << controller0.last_value()
+  // //       << std::endl;
+
+  // // AssertThrow(false, ExcMessage("stop"));
+
+  // // tmp = freesurface_df_dx_matrix * dphi_dn_freesurface
+  // freesurface_df_dx_matrix.vmult(tmp, dphi_dn_freesurface);
+  // pcout << "freesurface_df_dx_matrix * dphi_dx_freesurface mean "
+  //       << tmp.mean_value() * nfreesurface_dofs << std::endl;
+
+  // // dphi_dn_freesurface = freesurface_mass_matrix^-1 * tmp
+  // SolverControl controller1(solver_control);
+  // // SolverCG<TrilinosWrappers::MPI::Vector> solver1(controller1);
+  // SolverGMRES<TrilinosWrappers::MPI::Vector> solver1(
+  //   controller1,
+  //   SolverGMRES<TrilinosWrappers::MPI::Vector>::AdditionalData(1000));
+
+  // solver1.solve(freesurface_mass_matrix,
+  //               dphi_dn_freesurface,
+  //               tmp,
+  //               freesurface_mass_preconditioner);
+  // pcout << "d2phi_dx2_freesurface mean "
+  //       << dphi_dn_freesurface.mean_value() * nfreesurface_dofs << std::endl;
+
+  // // pcout << "    second solve took " << controller1.last_step() << " steps"
+  // //       << std::endl;
+  // // pcout << "    second solve last value " << controller1.last_value()
+  // //       << std::endl;
 }
 
 template <int dim>

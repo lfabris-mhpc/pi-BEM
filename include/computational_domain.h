@@ -146,6 +146,19 @@ public:
   refine_and_resize_by_cad_projections(double max_tol);
 
   void
+  mark_refinement_along_radius(types::boundary_id boundary_id);
+
+  void
+  refine_along_radius(std::map<unsigned int, dealii::types::boundary_id>
+                        boundary_radial_refinements);
+
+  void
+  resize_along_radius(
+    double                               untouched_radius,
+    double                               ratio,
+    std::set<dealii::types::manifold_id> manifolds_to_be_scaled);
+
+  void
   refine_and_resize_wrapup();
 
   /// method to refine the imported mesh
@@ -270,8 +283,11 @@ public:
   std::vector<unsigned int> robin_boundary_ids;
   std::vector<unsigned int> freesurface_boundary_ids;
 
-  std::map<unsigned int, unsigned int> manifold2bcondition_map;
-  std::map<unsigned int, unsigned int> manifold2bcondition_slot_map;
+  std::map<unsigned int, unsigned int>       manifold2bcondition_map;
+  std::map<unsigned int, unsigned int>       manifold2bcondition_slot_map;
+  std::map<types::boundary_id, unsigned int> boundary_radial_refinements;
+
+  std::vector<unsigned int> flat_boundary_ids;
 
   MPI_Comm mpi_communicator;
 

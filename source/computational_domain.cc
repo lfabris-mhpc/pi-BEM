@@ -1,6 +1,10 @@
 #include <deal.II/grid/grid_reordering.h>
 #include <deal.II/grid/grid_tools.h>
 
+#include <deal.II/opencascade/boundary_lib.h>
+#include <deal.II/opencascade/utilities.h>
+
+#include <BRepBuilderAPI_Transform.hxx>
 #include <deal2lkit/utilities.h>
 
 #include "../include/boundary_conditions.h"
@@ -124,6 +128,10 @@ ComputationalDomain<dim>::declare_parameters(ParameterHandler &prm)
       "0,0, 1,0, 2,0",
       Patterns::List(Patterns::Integer(0)),
       "For each manifold, specify the boundary condition slot identifying the function to be used\n");
+    prm.declare_entry("Flat boundaries",
+                      "",
+                      Patterns::List(Patterns::Integer(0)),
+                      "Boundary ids to be marked with flat_manifold_id\n");
   }
   prm.leave_subsection();
 
@@ -132,6 +140,16 @@ ComputationalDomain<dim>::declare_parameters(ParameterHandler &prm)
   prm.declare_entry("Axis x dimension", "2.", Patterns::Double());
   prm.declare_entry("Axis y dimension", "3.", Patterns::Double());
   prm.declare_entry("Axis z dimension", "4.", Patterns::Double());
+
+  prm.declare_entry(
+    "Boundary additional radial refinement cycles",
+    "",
+    Patterns::List(Patterns::Integer(0)),
+    "List of integers where the values from pos i, i+1 (i is "
+    "even) identify respectively a boundary_id and the number "
+    "of radial refinements (which means cuts will be applied perpendicular to the radius) "
+    "of its cells that will be carried out "
+    "prior to the resolution of the problem");
 }
 
 template <int dim>
@@ -269,6 +287,16 @@ ComputationalDomain<dim>::parse_parameters(ParameterHandler &prm)
         AssertIndexRange(manifold2bcondition_slot_map[manifold],
                          BoundaryConditions<dim>::MAX_CONDITION_SLOTS);
       }
+
+    flat_boundary_ids.clear();
+    std::vector<std::string> flat_boundary_string_list =
+      Utilities::split_string_list(prm.get("Flat boundaries"));
+    flat_boundary_ids.resize(flat_boundary_string_list.size());
+    for (unsigned int i = 0; i < flat_boundary_string_list.size(); ++i)
+      {
+        std::istringstream reader(flat_boundary_string_list[i]);
+        reader >> flat_boundary_ids[i];
+      }
   }
   prm.leave_subsection();
 
@@ -297,6 +325,24 @@ ComputationalDomain<dim>::parse_parameters(ParameterHandler &prm)
         }
       pcout << " with slot " << manifold2bcondition_slot_map[pair.first]
             << std::endl;
+    }
+
+  std::vector<std::string> m = Utilities::split_string_list(
+    prm.get("Boundary additional radial refinement cycles"));
+  boundary_radial_refinements.clear();
+  Assert(m.size() % 2 == 0, ExcInternalError());
+  for (unsigned int i = 0; i < m.size(); i += 2)
+    {
+      std::istringstream key_reader(m[i]);
+      std::istringstream value_reader(m[i + 1]);
+      unsigned int       n;
+      value_reader >> n;
+      if (n)
+        {
+          types::boundary_id b;
+          key_reader >> b;
+          boundary_radial_refinements[b] = n;
+        }
     }
 }
 
@@ -396,6 +442,15 @@ ComputationalDomain<dim>::read_domain()
       if (cell->material_id() && !cell->manifold_id())
         {
           cell->set_manifold_id(cell->material_id());
+        }
+
+      if (std::find(flat_boundary_ids.begin(),
+                    flat_boundary_ids.end(),
+                    cell->material_id()) != flat_boundary_ids.end())
+        {
+          pcout << "set material " << cell->material_id() << " to flat manifold"
+                << std::endl;
+          cell->set_manifold_id(numbers::flat_manifold_id);
         }
     }
 }
@@ -916,8 +971,8 @@ ComputationalDomain<3>::refine_and_resize_by_cad_projections(double max_tol)
                   TopoDS_Shape neededShape =
                     cad_surfaces[cell->manifold_id() - 1];
 
-                  // pcout << "surface_curvature_refinement - gotten cad
-                  // surface"
+                  // pcout << "surface_curvature_refinement - gotten cad surface
+                  // "
                   //       << std::endl;
                   // pcout << "Refining from manifold " << cell->manifold_id()
                   //       << std::endl;
@@ -1000,6 +1055,209 @@ ComputationalDomain<3>::refine_and_resize_by_cad_projections(double max_tol)
     }
 }
 
+template <>
+void ComputationalDomain<2>::mark_refinement_along_radius(types::boundary_id)
+{}
+
+template <>
+void
+ComputationalDomain<3>::mark_refinement_along_radius(
+  types::boundary_id boundary_id)
+{
+  for (const auto &cell : tria.active_cell_iterators())
+    {
+      if (cell->boundary_id() == boundary_id)
+        {
+          // compute which cell's axis is more along the radius
+          // from origin
+          // aim to cut perpendicular to the radius
+          auto radius = cell->center();
+          radius /= radius.norm();
+          auto axis0 = cell->vertex(1) - cell->vertex(0);
+          axis0 /= axis0.norm();
+          auto axis1 = cell->vertex(2) - cell->vertex(0);
+          axis1 /= axis1.norm();
+
+          if (std::abs(axis0 * radius) > std::abs(axis1 * radius))
+            {
+              // so, axis1 is more along radius than axis0
+              // cut along axis1
+              cell->set_refine_flag(RefinementCase<2>::cut_x);
+            }
+          else
+            {
+              cell->set_refine_flag(RefinementCase<2>::cut_y);
+            }
+        }
+    }
+}
+
+template <>
+void ComputationalDomain<2>::refine_along_radius(
+  std::map<unsigned int, dealii::types::boundary_id>)
+{}
+
+template <>
+void
+ComputationalDomain<3>::refine_along_radius(
+  std::map<unsigned int, dealii::types::boundary_id>
+    boundary_radial_refinements)
+{
+  if (!boundary_radial_refinements.empty())
+    {
+      pcout << "boundary-based radial refinement" << std::endl;
+      auto boundary_refinements_residual = boundary_radial_refinements;
+
+      while (!boundary_refinements_residual.empty())
+        {
+          for (const auto &pair : boundary_refinements_residual)
+            {
+              pcout << "boundary " << pair.first << " still needs "
+                    << pair.second << " refinements" << std::endl;
+            }
+
+          update_triangulation();
+
+          for (const auto &pair : boundary_refinements_residual)
+            {
+              if (pair.second)
+                {
+                  mark_refinement_along_radius(pair.first);
+                }
+            }
+
+          tria.execute_coarsening_and_refinement();
+          make_edges_conformal();
+
+          for (auto iter = boundary_refinements_residual.begin();
+               iter != boundary_refinements_residual.end();)
+            {
+              if (iter->second <= 1)
+                {
+                  iter = boundary_refinements_residual.erase(iter);
+                }
+              else
+                {
+                  iter->second--;
+                  ++iter;
+                }
+            }
+        }
+    }
+}
+
+template <>
+void
+ComputationalDomain<2>::resize_along_radius(
+  double,
+  double,
+  std::set<dealii::types::manifold_id>)
+{
+  AssertThrow(
+    false, ExcMessage("resize_along_radius is not implemented for dim != 3"));
+}
+
+template <>
+void
+ComputationalDomain<3>::resize_along_radius(
+  double                               untouched_radius,
+  double                               scale_factor,
+  std::set<dealii::types::manifold_id> manifolds_to_be_scaled)
+{
+  if (std::abs(scale_factor - 1) > 1e-4)
+    {
+      pcout << "scale mesh by factor " << scale_factor << " outside radius "
+            << untouched_radius << std::endl;
+      auto func = [untouched_radius,
+                   scale_factor](const Point<3> &in) -> Point<3> {
+        if (in.norm() - untouched_radius > 1e-4)
+          {
+            return in * scale_factor;
+          }
+
+        return in;
+      };
+
+      GridTools::transform(func, tria);
+
+      // transform the opencascade surfaces and curves, reload them as
+      // manifolds
+      gp_Trsf mani_transform;
+      mani_transform.SetScale(gp_Pnt(0, 0, 0), scale_factor);
+
+      BRepBuilderAPI_Transform mani_manipulator(mani_transform);
+
+      // update opencascade raw objects
+      for (unsigned int i = 0; i < cad_surfaces.size(); ++i)
+        {
+          types::manifold_id manifold_id = i + 1;
+          if (manifolds_to_be_scaled.count(manifold_id))
+            {
+              pcout << "scale manifold " << manifold_id << " by factor "
+                    << scale_factor << std::endl;
+              mani_manipulator.Perform(cad_surfaces[i], true);
+              cad_surfaces[i] = mani_manipulator.Shape();
+            }
+        }
+
+      for (unsigned int i = 0; i < cad_curves.size(); ++i)
+        {
+          types::manifold_id manifold_id = i + 11;
+          if (manifolds_to_be_scaled.count(manifold_id))
+            {
+              pcout << "scale curve " << manifold_id << " by factor "
+                    << scale_factor << std::endl;
+              mani_manipulator.Perform(cad_curves[i], true);
+              cad_curves[i] = mani_manipulator.Shape();
+            }
+        }
+
+      // update projectors
+      for (unsigned int i = 0; i < cad_surfaces.size(); ++i)
+        {
+          types::manifold_id manifold_id = i + 1;
+          if (manifolds_to_be_scaled.count(manifold_id))
+            {
+              pcout << "update manifold projector " << manifold_id << std::endl;
+              normal_to_mesh_projectors[i] = std::make_shared<
+                OpenCASCADE::NormalToMeshProjectionManifold<2, 3>>(
+                cad_surfaces[i]);
+            }
+        }
+
+      for (unsigned int i = 0; i < cad_curves.size(); ++i)
+        {
+          types::manifold_id manifold_id = i + 11;
+          if (manifolds_to_be_scaled.count(manifold_id))
+            {
+              pcout << "update curve projector " << manifold_id << std::endl;
+              line_projectors[i] = std::make_shared<
+                OpenCASCADE::ArclengthProjectionLineManifold<2, 3>>(
+                cad_curves[i]);
+            }
+        }
+
+      pcout << "update mesh manifolds" << std::endl;
+      // apply projectors as manifolds
+      for (unsigned int i = 0; i < cad_surfaces.size(); ++i)
+        {
+          types::manifold_id manifold_id = i + 1;
+          tria.reset_manifold(manifold_id);
+          tria.set_manifold(manifold_id, *normal_to_mesh_projectors[i]);
+        }
+
+      for (unsigned int i = 0; i < cad_curves.size(); ++i)
+        {
+          types::manifold_id manifold_id = i + 11;
+          tria.reset_manifold(manifold_id);
+          tria.set_manifold(manifold_id, *line_projectors[i]);
+        }
+    }
+
+  refine_and_resize_by_aspect_ratio();
+  refine_and_resize_by_cad_projections(1e-5);
+}
+
 template <int dim>
 void
 ComputationalDomain<dim>::refine_and_resize_wrapup()
@@ -1045,6 +1303,10 @@ ComputationalDomain<dim>::refine_and_resize(const unsigned int refinement_level)
   refine_and_resize_by_cad_projections(max_tol);
 
   tria.refine_global(refinement_level);
+
+  update_triangulation();
+
+  refine_along_radius(boundary_radial_refinements);
 
   refine_and_resize_wrapup();
 

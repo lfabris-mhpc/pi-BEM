@@ -519,6 +519,9 @@ BoundaryConditions<dim>::prepare_robin_datastructs(
             }
         }
     }
+
+  robin_scaler.compress(VectorOperation::insert);
+  robin_rhs.compress(VectorOperation::insert);
 }
 
 template <int dim>
@@ -578,6 +581,11 @@ BoundaryConditions<dim>::prepare_robin_datastructs(
             }
         }
     }
+
+  robin_scaler.compress(VectorOperation::insert);
+  robin_rhs.compress(VectorOperation::insert);
+  robin_scaler_imag.compress(VectorOperation::insert);
+  robin_rhs_imag.compress(VectorOperation::insert);
 }
 
 
@@ -602,11 +610,12 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
   std::set<types::global_dof_index> processed;
   for (const auto &cell : bem.dh.active_cell_iterators())
     {
-      if (comp_dom.manifold2bcondition_map[cell->manifold_id()] ==
+      if (comp_dom.manifold2bcondition_map[cell->material_id()] ==
           BoundaryConditionType::freesurface)
         {
+          // TODO: use material instead of manifold...
           auto slot =
-            comp_dom.manifold2bcondition_slot_map[cell->manifold_id()];
+            comp_dom.manifold2bcondition_slot_map[cell->material_id()];
           cell->get_dof_indices(local_dof_indices);
           for (auto j : local_dof_indices)
             {
@@ -619,6 +628,7 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
                   AssertThrow(coeffs(1) != 0,
                               ExcMessage(
                                 "The middle coefficient cannot be zero"));
+                  // pcout << "freesurface coeffs " << coeffs << std::endl;
                   freesurface_scaler(j) = coeffs(0) / coeffs(1);
                   freesurface_rhs(j)    = coeffs(2) / coeffs(1);
 
@@ -627,6 +637,9 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
             }
         }
     }
+
+  freesurface_scaler.compress(VectorOperation::insert);
+  freesurface_rhs.compress(VectorOperation::insert);
 }
 
 template <int dim>
@@ -653,11 +666,12 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
   std::set<types::global_dof_index> processed;
   for (const auto &cell : bem.dh.active_cell_iterators())
     {
-      if (comp_dom.manifold2bcondition_map[cell->manifold_id()] ==
+      if (comp_dom.manifold2bcondition_map[cell->material_id()] ==
           BoundaryConditionType::freesurface)
         {
+          // TODO: use material instead of manifold...
           auto slot =
-            comp_dom.manifold2bcondition_slot_map[cell->manifold_id()];
+            comp_dom.manifold2bcondition_slot_map[cell->material_id()];
           cell->get_dof_indices(local_dof_indices);
           for (auto j : local_dof_indices)
             {
@@ -690,6 +704,11 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
             }
         }
     }
+
+  freesurface_scaler.compress(VectorOperation::insert);
+  freesurface_rhs.compress(VectorOperation::insert);
+  freesurface_scaler_imag.compress(VectorOperation::insert);
+  freesurface_rhs_imag.compress(VectorOperation::insert);
 }
 
 template <int dim>

@@ -1,6 +1,8 @@
 #define TOLL 0.001
 
-#include <omp.h>
+#ifdef _OPENMP
+#  include <omp.h>
+#endif
 
 #include "../include/bem_fma.h"
 #include "../include/laplace_kernel.h"
@@ -119,7 +121,7 @@ template <int dim>
 void
 BEMFMA<dim>::direct_integrals()
 {
-#ifdef _OPENMP
+#ifdef PBEM_OPENMP
   direct_integrals_omp();
 #else
   direct_integrals_tbb();
@@ -1048,7 +1050,7 @@ BEMFMA<dim>::direct_integrals_tbb()
   pcout << "...done computing direct integrals" << std::endl;
 }
 
-#ifdef _OPENMP
+#ifdef PBEM_OPENMP
 template <int dim>
 void
 BEMFMA<dim>::direct_integrals_omp()
@@ -2160,7 +2162,7 @@ BEMFMA<2>::multipole_matr_vect_products_tbb(
   TrilinosWrappers::MPI::Vector &) const
 {}
 
-#ifdef _OPENMP
+#ifdef PBEM_OPENMP
 template <>
 void
 BEMFMA<2>::multipole_matr_vect_products_omp(
@@ -2180,7 +2182,7 @@ BEMFMA<dim>::multipole_matr_vect_products(
   TrilinosWrappers::MPI::Vector &      matrVectProdN,
   TrilinosWrappers::MPI::Vector &      matrVectProdD) const
 {
-#ifdef _OPENMP
+#ifdef PBEM_OPENMP
   multipole_matr_vect_products_omp(phi_values,
                                    dphi_dn_values,
                                    matrVectProdN,
@@ -2551,7 +2553,7 @@ BEMFMA<dim>::multipole_matr_vect_products_tbb(
 }
 
 
-#ifdef _OPENMP
+#ifdef PBEM_OPENMP
 template <int dim>
 void
 BEMFMA<dim>::multipole_matr_vect_products_omp(
@@ -2852,7 +2854,7 @@ TrilinosWrappers::PreconditionILU &
 BEMFMA<dim>::FMA_preconditioner(const TrilinosWrappers::MPI::Vector &alpha,
                                 AffineConstraints<double> &          c)
 {
-#ifdef _OPENMP
+#ifdef PBEM_OPENMP
   return FMA_preconditioner_omp(alpha, c);
 #else
   return FMA_preconditioner_tbb(alpha, c);
@@ -3037,7 +3039,7 @@ BEMFMA<dim>::FMA_preconditioner_tbb(
   return preconditioner;
 }
 
-#ifdef _OPENMP
+#ifdef PBEM_OPENMP
 template <int dim>
 TrilinosWrappers::PreconditionILU &
 BEMFMA<dim>::FMA_preconditioner_omp(
@@ -3170,7 +3172,7 @@ BEMFMA<dim>::FMA_preconditioner_complex(
   const TrilinosWrappers::MPI::Vector &alpha,
   AffineConstraints<double> &          c)
 {
-#ifdef _OPENMP
+#ifdef PBEM_OPENMP
   return FMA_preconditioner_complex_omp(alpha, c);
 #else
   return FMA_preconditioner_complex_tbb(alpha, c);
@@ -3370,7 +3372,7 @@ BEMFMA<dim>::FMA_preconditioner_complex_tbb(
   return preconditioner;
 }
 
-#ifdef _OPENMP
+#ifdef PBEM_OPENMP
 template <int dim>
 TrilinosWrappers::PreconditionILU &
 BEMFMA<dim>::FMA_preconditioner_omp(

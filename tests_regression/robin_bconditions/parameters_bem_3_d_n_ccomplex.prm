@@ -52,7 +52,7 @@ subsection BoundaryConditions<3>
 
   subsection Potential 0 1 3d
     set Function constants  = 
-    set Function expression = x+y+z
+    set Function expression = x+y+z+2
     set Variable names      = x,y,z,t
   end
 
@@ -77,6 +77,18 @@ subsection BoundaryConditions<3>
   subsection Robin coefficients 0 1 3d
     set Function constants  = 
     set Function expression = 1/(2*(x+y+z+2)); 1; x+y+z+1
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Free surface coefficients 0 0 3d
+    set Function constants  = 
+    set Function expression = 1/(2*(x+y+z+2)); 1; x+y+z+1
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Free surface coefficients 0 1 3d
+    set Function constants  = 
+    set Function expression = 0; 1; x+y+z+1
     set Variable names      = x,y,z,t
   end
 
@@ -111,6 +123,18 @@ subsection BoundaryConditions<3>
   end 
 
   subsection Robin coefficients 1 1 3d
+    set Function constants  = 
+    set Function expression = 1/(2*(x+y+z+2)); 0; -x-y-z
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Free surface coefficients 1 0 3d
+    set Function constants  = 
+    set Function expression = 1/(2*(x+y+z+2)); 0; -x-y-z
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Free surface coefficients 1 1 3d
     set Function constants  = 
     set Function expression = 1/(2*(x+y+z+2)); 0; -x-y-z
     set Variable names      = x,y,z,t

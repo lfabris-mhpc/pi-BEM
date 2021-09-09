@@ -188,32 +188,27 @@ public:
   void
   assemble_system_old();
 
-  double
-  compute_stabilization_delta(const double         hk,
-                              const double         eps,
-                              const Tensor<1, dim> dir,
-                              const double         pk)
-  {
-    const double Peclet = dir.norm() * hk / (2.0 * eps * pk);
-    const double coth =
-      (1.0 + std::exp(-2.0 * Peclet)) / (1.0 - std::exp(-2.0 * Peclet));
+  // double
+  // compute_stabilization_delta(const double         hk,
+  //                             const double         eps,
+  //                             const Tensor<1, dim> dir,
+  //                             const double         pk)
+  // {
+  //   const double Peclet = dir.norm() * hk / (2.0 * eps * pk);
+  //   const double coth =
+  //     (1.0 + std::exp(-2.0 * Peclet)) / (1.0 - std::exp(-2.0 * Peclet));
 
-    return hk / (2.0 * dir.norm() * pk) * (coth - 1.0 / Peclet);
-  }
+  //   return hk / (2.0 * dir.norm() * pk) * (coth - 1.0 / Peclet);
+  // }
+
+  void
+  freesurface_phi_to_dphi_dx(
+    TrilinosWrappers::MPI::Vector &      dphi_dx_freesurface,
+    const TrilinosWrappers::MPI::Vector &phi_freesurface) const;
 
   void
   freesurface_phi_to_d2phi_dx2(
-    TrilinosWrappers::MPI::Vector &      dphi_dn_freesurface,
-    const TrilinosWrappers::MPI::Vector &phi_freesurface) const;
-
-  void
-  freesurface_phi_to_d2phi_dx2_v1(
-    TrilinosWrappers::MPI::Vector &      dphi_dn_freesurface,
-    const TrilinosWrappers::MPI::Vector &phi_freesurface) const;
-
-  void
-  freesurface_phi_to_d2phi_dx2_v2(
-    TrilinosWrappers::MPI::Vector &      dphi_dn_freesurface,
+    TrilinosWrappers::MPI::Vector &      d2phi_dx2_freesurface,
     const TrilinosWrappers::MPI::Vector &phi_freesurface) const;
 
   /// The next three methods are
