@@ -999,7 +999,7 @@ BEMProblem<dim>::assemble_system_tbb()
 
 template <int dim>
 void
-BEMProblem<dim>::assemble_system_old()
+BEMProblem<dim>::assemble_system_singlethread()
 {
   Teuchos::TimeMonitor LocalTimer(*AssembleTime);
   pcout << "(Directly) Assembling system matrices" << std::endl;
@@ -2028,7 +2028,14 @@ BEMProblem<dim>::solve(TrilinosWrappers::MPI::Vector &      phi,
     {
       if (solution_method == "Direct")
         {
-          assemble_system_tbb();
+          if (MultithreadInfo::n_threads() == 1)
+            {
+              assemble_system_singlethread();
+            }
+          else
+            {
+              assemble_system_tbb();
+            }
         }
       else
         {
@@ -2057,7 +2064,14 @@ BEMProblem<dim>::solve(TrilinosWrappers::MPI::Vector &      phi,
     {
       if (solution_method == "Direct")
         {
-          assemble_system_tbb();
+          if (MultithreadInfo::n_threads() == 1)
+            {
+              assemble_system_singlethread();
+            }
+          else
+            {
+              assemble_system_tbb();
+            }
         }
       else
         {
