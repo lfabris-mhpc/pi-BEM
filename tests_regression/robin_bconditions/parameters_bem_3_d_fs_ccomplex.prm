@@ -72,11 +72,71 @@ subsection BoundaryConditions<3>
     set Function constants  = 
     set Function expression = 1; -1; 0
     set Variable names      = x,y,z,t
-  end 
+  end
 
   subsection Robin coefficients 0 1 3d
     set Function constants  = 
     set Function expression = 1; -1; 0
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Free surface coefficients 0 0 3d
+    set Function constants  = 
+    set Function expression = 0; 1; x+y+z
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Free surface coefficients 0 1 3d
+    set Function constants  = 
+    set Function expression = 0; 1; x+y+z
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Potential 1 0 3d
+    set Function constants  = 
+    set Function expression = -x-y-z
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Potential 1 1 3d
+    set Function constants  = 
+    set Function expression = -x-y-z
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Wind function 1 0 3d
+    set Function constants  = 
+    set Function expression = -1; -1; -1
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Wind function 1 1 3d
+    set Function constants  = 
+    set Function expression = -1; -1; -1
+    set Variable names      = x,y,z,t
+  end
+  
+  subsection Robin coefficients 1 0 3d
+    set Function constants  = 
+    set Function expression = 0; 0; 0
+    set Variable names      = x,y,z,t
+  end 
+
+  subsection Robin coefficients 1 1 3d
+    set Function constants  = 
+    set Function expression = 0; 0; 0
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Free surface coefficients 1 0 3d
+    set Function constants  = 
+    set Function expression = 0; 0; -x-y-z
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Free surface coefficients 1 1 3d
+    set Function constants  = 
+    set Function expression = 0; 0; -x-y-z
     set Variable names      = x,y,z,t
   end
 end
@@ -101,9 +161,10 @@ subsection ComputationalDomain<3>
 
 
   subsection Boundary Conditions ID Numbers
-    set Dirichlet boundary ids   = 1,110,110
+    set Dirichlet boundary ids   = 1
     set Neumann boundary ids     = 
-    set Robin boundary ids       = 2
+    set Robin boundary ids       = 
+    set Free surface boundary ids       = 2
 
     # For each manifold, specify the boundary condition slot identifying the
     # function to be used
@@ -114,9 +175,9 @@ end
 
 
 subsection Driver<3>
-  set Potential components  = 1
+  set Potential components  = 2
   set Set Global Refinement = true
-  set Complex components    = 
+  set Complex components    = 0
 end
 
 

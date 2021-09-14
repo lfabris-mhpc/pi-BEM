@@ -400,6 +400,49 @@ public:
     return vector_surface_gradients_solutions[component];
   }
 
+  static void
+  complex_vector_add_scaled(TrilinosWrappers::MPI::Vector &      dst,
+                            TrilinosWrappers::MPI::Vector &      dst_imag,
+                            const TrilinosWrappers::MPI::Vector &src,
+                            const TrilinosWrappers::MPI::Vector &src_imag,
+                            double                               alpha,
+                            double                               alpha_imag,
+                            double                               sign = 1.0)
+  {
+    dst.add(sign * alpha, src, -sign * alpha_imag, src_imag);
+    dst_imag.add(sign * alpha, src_imag, sign * alpha_imag, src);
+  }
+
+  static void
+  complex_vector_add_scaled(TrilinosWrappers::MPI::Vector &      dst,
+                            TrilinosWrappers::MPI::Vector &      dst_imag,
+                            const TrilinosWrappers::MPI::Vector &src,
+                            const TrilinosWrappers::MPI::Vector &src_imag,
+                            const TrilinosWrappers::MPI::Vector &alpha,
+                            const TrilinosWrappers::MPI::Vector &alpha_imag,
+                            double                               sign = 1.0)
+  {
+    static TrilinosWrappers::MPI::Vector tmp(src);
+    if (tmp.size() != src.size())
+      {
+        tmp.reinit(src);
+      }
+
+    tmp = src;
+    tmp.scale(alpha);
+    dst.add(sign, tmp);
+    tmp = src_imag;
+    tmp.scale(alpha_imag);
+    dst.add(-sign, tmp);
+
+    tmp = src;
+    tmp.scale(alpha_imag);
+    dst_imag.add(sign, tmp);
+    tmp = src_imag;
+    tmp.scale(alpha);
+    dst_imag.add(sign, tmp);
+  }
+
   FullMatrix<double>
   get_system_matrix() const
   {
@@ -605,7 +648,12 @@ public:
   // handles linearized pressure conditions such as
   // coeffs[i, 0] * d^2_phi_dx^2 + coeffs[i, 1] * dphi_dn = coeffs[i, 2]
   // expected that coeffs[i] = (U^2 / g, 1, 0)
-  TrilinosWrappers::MPI::Vector     freesurface_scaler, freesurface_scaler_imag;
+  TrilinosWrappers::MPI::Vector freesurface_phi_scaler,
+    freesurface_phi_scaler_imag;
+  TrilinosWrappers::MPI::Vector freesurface_dphi_dx_scaler,
+    freesurface_dphi_dx_scaler_imag;
+  TrilinosWrappers::MPI::Vector freesurface_d2phi_dx2_scaler,
+    freesurface_d2phi_dx2_scaler_imag;
   TrilinosWrappers::MPI::Vector     freesurface_rhs, freesurface_rhs_imag;
   TrilinosWrappers::PreconditionILU freesurface_mass_preconditioner;
   TrilinosWrappers::SparseMatrix    freesurface_mass_matrix;

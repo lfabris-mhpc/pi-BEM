@@ -34,8 +34,8 @@ subsection BEMProblem<3>
     set Log frequency = 1
     set Log history   = false
     set Log result    = true
-    set Max steps     = 100
-    set Tolerance     = 1.e-10
+    set Max steps     = 1000
+    set Tolerance     = 1.e-6
   end
 
 end
@@ -43,40 +43,108 @@ end
 
 subsection BoundaryConditions<3>
   set Output file name = result
+  
+  #using w = 0
+  #using U = 3
+  #using g = 9.80665
 
   subsection Potential 0 0 3d
     set Function constants  = 
-    set Function expression = x+y+z
+    set Function expression = 0
     set Variable names      = x,y,z,t
   end
 
   subsection Potential 0 1 3d
     set Function constants  = 
-    set Function expression = x+y+z
+    set Function expression = 0
     set Variable names      = x,y,z,t
   end
 
   subsection Wind function 0 0 3d
     set Function constants  = 
-    set Function expression = 1; 1; 1
+    set Function expression = 0; 0; 0
     set Variable names      = x,y,z,t
   end
 
   subsection Wind function 0 1 3d
     set Function constants  = 
-    set Function expression = 1; 1; 1
+    set Function expression = -3; 0; 0
     set Variable names      = x,y,z,t
   end
   
   subsection Robin coefficients 0 0 3d
     set Function constants  = 
-    set Function expression = 1; -1; 0
+    set Function expression = 0; 0; 0
     set Variable names      = x,y,z,t
-  end 
+  end
 
   subsection Robin coefficients 0 1 3d
     set Function constants  = 
-    set Function expression = 1; -1; 0
+    set Function expression = 0; 0; 0
+    set Variable names      = x,y,z,t
+  end
+
+  # c0*phi + c1*dphi_dx + c2*d2phi_dx2 + c3*dphi_dn = c4
+  # -w^2*phi + -2jU*dphi_dx + U^2*d2phi_dx2 + g*dphi_dn = c4
+  subsection Free surface coefficients 0 0 3d
+    set Function constants  = 
+    set Function expression = -0*0; 0; 3*3; -9.80665; 0
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Free surface coefficients 0 1 3d
+    set Function constants  = 
+    set Function expression = 0; 0; 0; 0; 0
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Potential 1 0 3d
+    set Function constants  = 
+    set Function expression = 0
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Potential 1 1 3d
+    set Function constants  = 
+    set Function expression = 0
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Wind function 1 0 3d
+    set Function constants  = 
+    set Function expression = 0; 0; 0
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Wind function 1 1 3d
+    set Function constants  = 
+    set Function expression = -3; 0; 0
+    set Variable names      = x,y,z,t
+  end
+  
+  subsection Robin coefficients 1 0 3d
+    set Function constants  = 
+    set Function expression = 0; 0; 0
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Robin coefficients 1 1 3d
+    set Function constants  = 
+    set Function expression = 0; 0; 0
+    set Variable names      = x,y,z,t
+  end
+
+  # c0*phi + c1*dphi_dx + c2*d2phi_dx2 + c3*dphi_dn = c4
+  # -w^2*phi + -2jU*dphi_dx + U^2*d2phi_dx2 + g*dphi_dn = c4
+  subsection Free surface coefficients 1 0 3d
+    set Function constants  = 
+    set Function expression = 0; 0; 0; 0; 0
+    set Variable names      = x,y,z,t
+  end
+
+  subsection Free surface coefficients 1 1 3d
+    set Function constants  = 
+    set Function expression = 0; 0; 0; 0; 0
     set Variable names      = x,y,z,t
   end
 end
@@ -89,34 +157,36 @@ subsection ComputationalDomain<3>
   set Cad tolerance to projectors tolerance ratio                              = 100
   set Cells per circle                                                         = 12
   set Input grid format                                                        = inp
-  set Input grid name                                                          = grids/coarse_sphere_curves
-  set Input path to CAD files                                                  = grids/coarse_sphere_curves_iges/
+  set Input grid name                                                          = grids/cad_files/grid
+  set Input path to CAD files                                                  = grids/cad_files/
   set Max aspect ratio                                                         = 3.5
   set Maximum number of curvature adaptive refinement cycles                   = 2
-  set Number of cycles                                                         = 2
+  set Number of cycles                                                         = 1
   set Number of global refinement to be executed before local refinement cycle = 0
   set Surface curvature adaptive refinement                                    = true
   set Use a spheroid                                                           = false
   set Use iges surfaces and curves                                             = true
-
+  set Boundary additional radial refinement cycles                             = 5, 4
 
   subsection Boundary Conditions ID Numbers
-    set Dirichlet boundary ids   = 1,110,110
-    set Neumann boundary ids     = 
-    set Robin boundary ids       = 2
+    set Dirichlet boundary ids   = 
+    set Neumann boundary ids     = 1,2,3,4,6
+    set Robin boundary ids       = 
+    set Free surface boundary ids       = 5
 
     # For each manifold, specify the boundary condition slot identifying the
     # function to be used
-    set Manifold to boundary slot map = 0,0, 1,0, 2,0
+    set Manifold to boundary slot map = 0,0, 1,0, 2,0, 3,0, 4,0, 5,0, 6,1
+    set Flat boundaries = 5
   end
 
 end
 
 
 subsection Driver<3>
-  set Potential components  = 1
+  set Potential components  = 2
   set Set Global Refinement = true
-  set Complex components    = 
+  set Complex components    = 0
 end
 
 

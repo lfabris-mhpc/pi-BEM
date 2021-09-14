@@ -70,11 +70,14 @@ BoundaryConditions<dim>::declare_parameters(ParameterHandler &prm)
                                           "Wind function",
                                           "Robin coefficients",
                                           "Free surface coefficients"};
-  std::vector<std::string> defaults_2d = {"x+y", "1; 1", "1; -1", "1; -1"};
+  std::vector<std::string> defaults_2d = {"x+y",
+                                          "1; 1",
+                                          "0; 0; 0",
+                                          "0; 0; 0; 0; 0"};
   std::vector<std::string> defaults_3d = {"x+y+z",
                                           "1; 1; 1",
                                           "0; 0; 0",
-                                          "0; 0; 0"};
+                                          "0; 0; 0; 0; 0"};
 
   for (unsigned int d = 0; d < 2; ++d)
     {
@@ -101,15 +104,47 @@ BoundaryConditions<dim>::declare_parameters(ParameterHandler &prm)
                       else
                         {
                           Functions::ParsedFunction<3>::declare_parameters(prm);
+                          prm.set("Function expression", defaults_2d[cond]);
+                        }
+                    }
+                  else if (cond == 2)
+                    {
+                      // robin uses a 3d vector
+                      if (!d)
+                        {
+                          Functions::ParsedFunction<2>::declare_parameters(prm,
+                                                                           3);
+                          prm.set("Function expression", defaults_2d[cond]);
+                        }
+                      else
+                        {
+                          Functions::ParsedFunction<3>::declare_parameters(prm,
+                                                                           3);
+                          prm.set("Function expression", defaults_3d[cond]);
+                        }
+                    }
+                  else if (cond == 3)
+                    {
+                      // freesurface uses a 5d vector
+                      if (!d)
+                        {
+                          Functions::ParsedFunction<2>::declare_parameters(prm,
+                                                                           5);
+                          prm.set("Function expression", defaults_2d[cond]);
+                        }
+                      else
+                        {
+                          Functions::ParsedFunction<3>::declare_parameters(prm,
+                                                                           5);
                           prm.set("Function expression", defaults_3d[cond]);
                         }
                     }
                   else
                     {
-                      // every other outputs a vector
+                      // every other outputs a dim vector
                       if (!d)
                         {
-                          Functions::ParsedFunction<2>::declare_parameters(prm,
+                          Functions::ParsedFunction<3>::declare_parameters(prm,
                                                                            d +
                                                                              2);
                           prm.set("Function expression", defaults_2d[cond]);
@@ -153,6 +188,8 @@ BoundaryConditions<dim>::parse_parameters(ParameterHandler &prm)
 
               auto pos = comp * MAX_CONDITION_SLOTS + slot;
 
+              pcout << "parsing " << label << " " << slot << std::endl;
+
               prm.enter_subsection(label);
               switch (cond)
                 {
@@ -167,13 +204,13 @@ BoundaryConditions<dim>::parse_parameters(ParameterHandler &prm)
                     break;
                   case BoundaryConditionType::robin:
                     robin_coeffs[pos].reset(
-                      new Functions::ParsedFunction<dim>(dim));
+                      new Functions::ParsedFunction<dim>(3));
                     robin_coeffs[pos]->parse_parameters(prm);
                     break;
                   case BoundaryConditionType::freesurface:
                     // TODO: decide what shape has freesurface coefficients
                     freesurface_coeffs[pos].reset(
-                      new Functions::ParsedFunction<dim>(dim));
+                      new Functions::ParsedFunction<dim>(5));
                     freesurface_coeffs[pos]->parse_parameters(prm);
                     break;
                   case BoundaryConditionType::invalid:
@@ -210,7 +247,9 @@ BoundaryConditions<dim>::solve_problem(bool reset_matrix)
   tmp_rhs.reinit(this_cpu_set, mpi_communicator);
   bem.robin_scaler.reinit(this_cpu_set, mpi_communicator);
   bem.robin_rhs.reinit(this_cpu_set, mpi_communicator);
-  bem.freesurface_scaler.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_phi_scaler.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_dphi_dx_scaler.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_d2phi_dx2_scaler.reinit(this_cpu_set, mpi_communicator);
   bem.freesurface_rhs.reinit(this_cpu_set, mpi_communicator);
 
   if (reset_matrix)
@@ -226,7 +265,9 @@ BoundaryConditions<dim>::solve_problem(bool reset_matrix)
     }
   if (!comp_dom.freesurface_boundary_ids.empty())
     {
-      prepare_freesurface_datastructs(bem.freesurface_scaler,
+      prepare_freesurface_datastructs(bem.freesurface_phi_scaler,
+                                      bem.freesurface_dphi_dx_scaler,
+                                      bem.freesurface_d2phi_dx2_scaler,
                                       bem.freesurface_rhs);
     }
 
@@ -283,7 +324,9 @@ BoundaryConditions<dim>::solve_complex_problem(bool reset_matrix)
   tmp_rhs.reinit(this_cpu_set, mpi_communicator);
   bem.robin_scaler.reinit(this_cpu_set, mpi_communicator);
   bem.robin_rhs.reinit(this_cpu_set, mpi_communicator);
-  bem.freesurface_scaler.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_phi_scaler.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_dphi_dx_scaler.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_d2phi_dx2_scaler.reinit(this_cpu_set, mpi_communicator);
   bem.freesurface_rhs.reinit(this_cpu_set, mpi_communicator);
   // imaginary parts - next component
   get_phi(current_component + 1).reinit(this_cpu_set, mpi_communicator);
@@ -292,7 +335,9 @@ BoundaryConditions<dim>::solve_complex_problem(bool reset_matrix)
   tmp_rhs_imag.reinit(this_cpu_set, mpi_communicator);
   bem.robin_scaler_imag.reinit(this_cpu_set, mpi_communicator);
   bem.robin_rhs_imag.reinit(this_cpu_set, mpi_communicator);
-  bem.freesurface_scaler_imag.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_phi_scaler_imag.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_dphi_dx_scaler_imag.reinit(this_cpu_set, mpi_communicator);
+  bem.freesurface_d2phi_dx2_scaler_imag.reinit(this_cpu_set, mpi_communicator);
   bem.freesurface_rhs_imag.reinit(this_cpu_set, mpi_communicator);
 
   if (reset_matrix)
@@ -318,8 +363,12 @@ BoundaryConditions<dim>::solve_complex_problem(bool reset_matrix)
     }
   if (!comp_dom.freesurface_boundary_ids.empty())
     {
-      prepare_freesurface_datastructs(bem.freesurface_scaler,
-                                      bem.freesurface_scaler_imag,
+      prepare_freesurface_datastructs(bem.freesurface_phi_scaler,
+                                      bem.freesurface_phi_scaler_imag,
+                                      bem.freesurface_dphi_dx_scaler,
+                                      bem.freesurface_dphi_dx_scaler_imag,
+                                      bem.freesurface_d2phi_dx2_scaler,
+                                      bem.freesurface_d2phi_dx2_scaler_imag,
                                       bem.freesurface_rhs,
                                       bem.freesurface_rhs_imag);
     }
@@ -592,7 +641,9 @@ BoundaryConditions<dim>::prepare_robin_datastructs(
 template <int dim>
 void
 BoundaryConditions<dim>::prepare_freesurface_datastructs(
-  TrilinosWrappers::MPI::Vector &freesurface_scaler,
+  TrilinosWrappers::MPI::Vector &freesurface_phi_scaler,
+  TrilinosWrappers::MPI::Vector &freesurface_dphi_dx_scaler,
+  TrilinosWrappers::MPI::Vector &freesurface_d2phi_dx2_scaler,
   TrilinosWrappers::MPI::Vector &freesurface_rhs)
 {
   Teuchos::TimeMonitor LocalTimer(*PrepareTime);
@@ -606,7 +657,7 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
   const unsigned int                   dofs_per_cell = bem.fe->dofs_per_cell;
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
-  Vector<double>                    coeffs(3);
+  Vector<double>                    coeffs(5);
   std::set<types::global_dof_index> processed;
   for (const auto &cell : bem.dh.active_cell_iterators())
     {
@@ -622,15 +673,18 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
               if (this_cpu_set.is_element(j) && !processed.count(j))
                 {
                   // evaluate freesurface coefficients
-                  // coeffs(0) * phi + coeffs(1) * dphi_dn = coeffs(2)
+                  // coeffs(0) * phi + coeffs(1) * dphi_dx + coeffs(2) *
+                  // d2phi_dx2 + coeffs(3) * dphi_dn = coeffs(4)
                   get_freesurface_coeffs(current_component, slot)
                     .vector_value(support_points[j], coeffs);
-                  AssertThrow(coeffs(1) != 0,
+                  AssertThrow(coeffs(3) != 0,
                               ExcMessage(
-                                "The middle coefficient cannot be zero"));
+                                "The dphi_dn coefficient cannot be zero"));
                   // pcout << "freesurface coeffs " << coeffs << std::endl;
-                  freesurface_scaler(j) = coeffs(0) / coeffs(1);
-                  freesurface_rhs(j)    = coeffs(2) / coeffs(1);
+                  freesurface_phi_scaler(j)       = coeffs(0) / coeffs(3);
+                  freesurface_dphi_dx_scaler(j)   = coeffs(1) / coeffs(3);
+                  freesurface_d2phi_dx2_scaler(j) = coeffs(2) / coeffs(3);
+                  freesurface_rhs(j)              = coeffs(4) / coeffs(3);
 
                   processed.insert(j);
                 }
@@ -638,15 +692,21 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
         }
     }
 
-  freesurface_scaler.compress(VectorOperation::insert);
+  freesurface_phi_scaler.compress(VectorOperation::insert);
+  freesurface_dphi_dx_scaler.compress(VectorOperation::insert);
+  freesurface_d2phi_dx2_scaler.compress(VectorOperation::insert);
   freesurface_rhs.compress(VectorOperation::insert);
 }
 
 template <int dim>
 void
 BoundaryConditions<dim>::prepare_freesurface_datastructs(
-  TrilinosWrappers::MPI::Vector &freesurface_scaler,
-  TrilinosWrappers::MPI::Vector &freesurface_scaler_imag,
+  TrilinosWrappers::MPI::Vector &freesurface_phi_scaler,
+  TrilinosWrappers::MPI::Vector &freesurface_phi_scaler_imag,
+  TrilinosWrappers::MPI::Vector &freesurface_dphi_dx_scaler,
+  TrilinosWrappers::MPI::Vector &freesurface_dphi_dx_scaler_imag,
+  TrilinosWrappers::MPI::Vector &freesurface_d2phi_dx2_scaler,
+  TrilinosWrappers::MPI::Vector &freesurface_d2phi_dx2_scaler_imag,
   TrilinosWrappers::MPI::Vector &freesurface_rhs,
   TrilinosWrappers::MPI::Vector &freesurface_rhs_imag)
 {
@@ -661,8 +721,8 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
   const unsigned int                   dofs_per_cell = bem.fe->dofs_per_cell;
   std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
-  Vector<double>                    coeffs(3);
-  Vector<double>                    coeffs_imag(3);
+  Vector<double>                    coeffs(5);
+  Vector<double>                    coeffs_imag(5);
   std::set<types::global_dof_index> processed;
   for (const auto &cell : bem.dh.active_cell_iterators())
     {
@@ -686,18 +746,27 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
                   std::complex<double> c0(coeffs(0), coeffs_imag(0));
                   std::complex<double> c1(coeffs(1), coeffs_imag(1));
                   std::complex<double> c2(coeffs(2), coeffs_imag(2));
+                  std::complex<double> c3(coeffs(3), coeffs_imag(3));
+                  std::complex<double> c4(coeffs(4), coeffs_imag(4));
 
-                  AssertThrow(c1 != 0,
+                  AssertThrow(c3 != 0,
                               ExcMessage(
-                                "The middle coefficient cannot be zero"));
+                                "The dphi_dn coefficient cannot be zero"));
 
-                  std::complex<double> diag = c0 / c1;
-                  std::complex<double> rhs  = c2 / c1;
+                  std::complex<double> phi_scale       = c0 / c3;
+                  std::complex<double> dphi_dx_scale   = c1 / c3;
+                  std::complex<double> d2phi_dx2_scale = c2 / c3;
+                  std::complex<double> rhs             = c4 / c3;
 
-                  freesurface_scaler(j)      = std::real(diag);
-                  freesurface_scaler_imag(j) = std::imag(diag);
-                  freesurface_rhs(j)         = std::real(rhs);
-                  freesurface_rhs_imag(j)    = std::imag(rhs);
+                  freesurface_phi_scaler(j)          = std::real(phi_scale);
+                  freesurface_phi_scaler_imag(j)     = std::imag(phi_scale);
+                  freesurface_dphi_dx_scaler(j)      = std::real(dphi_dx_scale);
+                  freesurface_dphi_dx_scaler_imag(j) = std::imag(dphi_dx_scale);
+                  freesurface_d2phi_dx2_scaler(j) = std::real(d2phi_dx2_scale);
+                  freesurface_d2phi_dx2_scaler_imag(j) =
+                    std::imag(d2phi_dx2_scale);
+                  freesurface_rhs(j)      = std::real(rhs);
+                  freesurface_rhs_imag(j) = std::imag(rhs);
 
                   processed.insert(j);
                 }
@@ -705,9 +774,13 @@ BoundaryConditions<dim>::prepare_freesurface_datastructs(
         }
     }
 
-  freesurface_scaler.compress(VectorOperation::insert);
+  freesurface_phi_scaler.compress(VectorOperation::insert);
+  freesurface_phi_scaler_imag.compress(VectorOperation::insert);
+  freesurface_dphi_dx_scaler.compress(VectorOperation::insert);
+  freesurface_dphi_dx_scaler_imag.compress(VectorOperation::insert);
+  freesurface_d2phi_dx2_scaler.compress(VectorOperation::insert);
+  freesurface_d2phi_dx2_scaler_imag.compress(VectorOperation::insert);
   freesurface_rhs.compress(VectorOperation::insert);
-  freesurface_scaler_imag.compress(VectorOperation::insert);
   freesurface_rhs_imag.compress(VectorOperation::insert);
 }
 

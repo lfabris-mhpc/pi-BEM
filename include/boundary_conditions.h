@@ -128,24 +128,31 @@ public:
   prepare_bem_vectors(TrilinosWrappers::MPI::Vector &rhs);
 
   void
-  prepare_robin_datastructs(TrilinosWrappers::MPI::Vector &robin_scaler,
+  prepare_robin_datastructs(TrilinosWrappers::MPI::Vector &robin_phi_scaler,
                             TrilinosWrappers::MPI::Vector &robin_rhs);
 
   void
-  prepare_robin_datastructs(TrilinosWrappers::MPI::Vector &robin_scaler,
-                            TrilinosWrappers::MPI::Vector &robin_scaler_imag,
-                            TrilinosWrappers::MPI::Vector &robin_rhs,
-                            TrilinosWrappers::MPI::Vector &robin_rhs_imag);
+  prepare_robin_datastructs(
+    TrilinosWrappers::MPI::Vector &robin_phi_scaler,
+    TrilinosWrappers::MPI::Vector &robin_phi_scaler_imag,
+    TrilinosWrappers::MPI::Vector &robin_rhs,
+    TrilinosWrappers::MPI::Vector &robin_rhs_imag);
 
   void
   prepare_freesurface_datastructs(
     TrilinosWrappers::MPI::Vector &freesurface_scaler,
+    TrilinosWrappers::MPI::Vector &freesurface_dphi_dx_scaler,
+    TrilinosWrappers::MPI::Vector &freesurface_d2phi_dx2_scaler,
     TrilinosWrappers::MPI::Vector &freesurface_rhs);
 
   void
   prepare_freesurface_datastructs(
     TrilinosWrappers::MPI::Vector &freesurface_scaler,
     TrilinosWrappers::MPI::Vector &freesurface_scaler_imag,
+    TrilinosWrappers::MPI::Vector &freesurface_dphi_dx_scaler,
+    TrilinosWrappers::MPI::Vector &freesurface_dphi_dx_scaler_imag,
+    TrilinosWrappers::MPI::Vector &freesurface_d2phi_dx2_scaler,
+    TrilinosWrappers::MPI::Vector &freesurface_d2phi_dx2_scaler_imag,
     TrilinosWrappers::MPI::Vector &freesurface_rhs,
     TrilinosWrappers::MPI::Vector &freesurface_rhs_imag);
 

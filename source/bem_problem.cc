@@ -1613,6 +1613,8 @@ BEMProblem<dim>::freesurface_phi_to_dphi_dx(
 
   // tmp = freesurface_df_dx_matrix * phi_freesurface
   freesurface_df_dx_matrix.vmult(tmp, phi_freesurface);
+  // int nfreesurface_dofs =
+  //   freesurface_nodes.mean_value() * freesurface_nodes.size();
   // pcout << "freesurface_df_dx_matrix * phi_freesurface mean "
   //       << tmp.mean_value() * nfreesurface_dofs << std::endl;
 
@@ -1626,8 +1628,9 @@ BEMProblem<dim>::freesurface_phi_to_dphi_dx(
                 dphi_dx_freesurface,
                 tmp,
                 freesurface_mass_preconditioner);
+
   // pcout << "dphi_dx_freesurface mean "
-  //       << dphi_dn_freesurface.mean_value() * nfreesurface_dofs << std::endl;
+  //       << dphi_dx_freesurface.mean_value() * nfreesurface_dofs << std::endl;
 
   // pcout << "    first solve took " << controller0.last_step() << " steps"
   //       << std::endl;
@@ -1649,75 +1652,6 @@ BEMProblem<dim>::freesurface_phi_to_d2phi_dx2(
 
   freesurface_phi_to_dphi_dx(tmp, phi_freesurface);
   freesurface_phi_to_dphi_dx(d2phi_dx2_freesurface, tmp);
-
-  // static TrilinosWrappers::MPI::Vector tmp(this_cpu_set, mpi_communicator);
-  // if (tmp.size() != phi_freesurface.size())
-  //   {
-  //     tmp.reinit(this_cpu_set, mpi_communicator);
-  //   }
-
-  // unsigned int nfreesurface_dofs =
-  //   (unsigned int)(freesurface_nodes.mean_value() *
-  //   freesurface_nodes.size());
-  // pcout << "phi_freesurface mean "
-  //       << phi_freesurface.mean_value() * nfreesurface_dofs << std::endl;
-
-  // // the final result will initialize dphi_dn_freesurface such that:
-  // // freesurface_mass_matrix * dphi_dn_freesurface = freesurface_coeffs *
-  // // freesurface_df_dx_matrix * freesurface_mass_matrix^-1 *
-  // // freesurface_df_dx_matrix * phi_freesurface
-  // pcout << "starting tmp mean " << tmp.mean_value() * nfreesurface_dofs
-  //       << std::endl;
-
-  // // tmp = freesurface_df_dx_matrix * phi_freesurface
-  // freesurface_df_dx_matrix.vmult(tmp, phi_freesurface);
-  // pcout << "freesurface_df_dx_matrix * phi_freesurface mean "
-  //       << tmp.mean_value() * nfreesurface_dofs << std::endl;
-
-  // // dphi_dn_freesurface = freesurface_mass_matrix^-1 * tmp
-  // SolverControl controller0(solver_control);
-  // // SolverCG<TrilinosWrappers::MPI::Vector> solver0(controller0);
-  // SolverGMRES<TrilinosWrappers::MPI::Vector> solver0(
-  //   controller0,
-  //   SolverGMRES<TrilinosWrappers::MPI::Vector>::AdditionalData(1000));
-
-  // solver0.solve(freesurface_mass_matrix,
-  //               dphi_dn_freesurface,
-  //               tmp,
-  //               freesurface_mass_preconditioner);
-  // pcout << "dphi_dx_freesurface mean "
-  //       << dphi_dn_freesurface.mean_value() * nfreesurface_dofs << std::endl;
-
-  // // pcout << "    first solve took " << controller0.last_step() << " steps"
-  // //       << std::endl;
-  // // pcout << "    first solve last value " << controller0.last_value()
-  // //       << std::endl;
-
-  // // AssertThrow(false, ExcMessage("stop"));
-
-  // // tmp = freesurface_df_dx_matrix * dphi_dn_freesurface
-  // freesurface_df_dx_matrix.vmult(tmp, dphi_dn_freesurface);
-  // pcout << "freesurface_df_dx_matrix * dphi_dx_freesurface mean "
-  //       << tmp.mean_value() * nfreesurface_dofs << std::endl;
-
-  // // dphi_dn_freesurface = freesurface_mass_matrix^-1 * tmp
-  // SolverControl controller1(solver_control);
-  // // SolverCG<TrilinosWrappers::MPI::Vector> solver1(controller1);
-  // SolverGMRES<TrilinosWrappers::MPI::Vector> solver1(
-  //   controller1,
-  //   SolverGMRES<TrilinosWrappers::MPI::Vector>::AdditionalData(1000));
-
-  // solver1.solve(freesurface_mass_matrix,
-  //               dphi_dn_freesurface,
-  //               tmp,
-  //               freesurface_mass_preconditioner);
-  // pcout << "d2phi_dx2_freesurface mean "
-  //       << dphi_dn_freesurface.mean_value() * nfreesurface_dofs << std::endl;
-
-  // // pcout << "    second solve took " << controller1.last_step() << " steps"
-  // //       << std::endl;
-  // // pcout << "    second solve last value " << controller1.last_value()
-  // //       << std::endl;
 }
 
 template <int dim>
@@ -1764,10 +1698,27 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
       if (serv_phi_robin.size() != serv_phi_freesurface.size())
         {
           serv_phi_robin.reinit(serv_phi_freesurface, false);
+          serv_phi_robin_imag.reinit(serv_phi_freesurface, false);
         }
-      freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
-      serv_phi_robin.scale(freesurface_scaler);
+      // TODO: if the scalers were constants, this would be so much shorter and
+      // faster
+      // first: add scaled phi
+      serv_phi_robin = serv_phi_freesurface;
+      serv_phi_robin.scale(freesurface_phi_scaler);
       serv_dphi_dn -= serv_phi_robin;
+
+      // second: add scaled dphi_dx
+      freesurface_phi_to_dphi_dx(serv_phi_robin, serv_phi_freesurface);
+      serv_phi_robin_imag = serv_phi_robin;
+      // serv_phi_robin_imag.scale(freesurface_nodes);
+      serv_phi_robin_imag.scale(freesurface_dphi_dx_scaler);
+      serv_dphi_dn -= serv_phi_robin_imag;
+
+      // third: add scaled d2phi_dx2
+      freesurface_phi_to_dphi_dx(serv_phi_robin_imag, serv_phi_robin);
+      // serv_phi_robin_imag.scale(freesurface_nodes);
+      serv_phi_robin_imag.scale(freesurface_d2phi_dx2_scaler);
+      serv_dphi_dn -= serv_phi_robin_imag;
     }
 
   if (solution_method == "Direct")
@@ -1843,12 +1794,6 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
   serv_dphi_dn.scale(dirichlet_nodes);
   serv_dphi_dn_imag.scale(dirichlet_nodes);
 
-  static TrilinosWrappers::MPI::Vector tmp(this_cpu_set, mpi_communicator);
-  if (tmp.size() != src.size())
-    {
-      tmp.reinit(this_cpu_set, mpi_communicator);
-    }
-
   // conversion to dphi_dn - any of these two will have can_determine_phi =
   // true, so no previous phi shift
   if (!comp_dom.robin_boundary_ids.empty())
@@ -1869,17 +1814,13 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
       // serv_dphi_dn_imag += -robin_matrix_diagonal_imag*serv_phi_robin -
       // robin_matrix_diagonal * serv_phi_robin_imag
 
-      tmp = serv_phi_robin;
-      tmp.scale(robin_scaler);
-      serv_dphi_dn -= tmp;
-      tmp = serv_phi_robin_imag;
-      tmp.scale(robin_scaler_imag);
-      serv_dphi_dn += tmp;
-
-      // these can be destructive
-      serv_phi_robin.scale(robin_scaler_imag);
-      serv_phi_robin_imag.scale(robin_scaler);
-      serv_dphi_dn_imag.add(-1, serv_phi_robin, -1, serv_phi_robin_imag);
+      complex_vector_add_scaled(serv_dphi_dn,
+                                serv_dphi_dn_imag,
+                                serv_phi_robin,
+                                serv_phi_robin_imag,
+                                robin_scaler,
+                                robin_scaler_imag,
+                                -1);
     }
   if (!comp_dom.freesurface_boundary_ids.empty())
     {
@@ -1891,29 +1832,54 @@ BEMProblem<dim>::vmult(TrilinosWrappers::MPI::Vector &      dst,
       serv_phi += serv_phi_freesurface;
       serv_phi_imag += serv_phi_freesurface_imag;
 
+      static TrilinosWrappers::MPI::Vector tmp(this_cpu_set, mpi_communicator);
+      static TrilinosWrappers::MPI::Vector tmp_imag(this_cpu_set,
+                                                    mpi_communicator);
+      if (tmp.size() != src.size())
+        {
+          tmp.reinit(this_cpu_set, mpi_communicator);
+          tmp_imag.reinit(this_cpu_set, mpi_communicator);
+        }
+
       // override serv_phi_robin, used as a tmp
       if (serv_phi_robin.size() != serv_phi_freesurface.size())
         {
           serv_phi_robin.reinit(serv_phi_freesurface, false);
-        }
-      freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
-      if (serv_phi_robin_imag.size() != serv_phi_freesurface.size())
-        {
           serv_phi_robin_imag.reinit(serv_phi_freesurface_imag, false);
         }
-      freesurface_phi_to_d2phi_dx2(serv_phi_robin_imag,
-                                   serv_phi_freesurface_imag);
-      tmp = serv_phi_robin;
-      tmp.scale(freesurface_scaler);
-      serv_dphi_dn -= tmp;
-      tmp = serv_phi_robin_imag;
-      tmp.scale(freesurface_scaler_imag);
-      serv_dphi_dn += tmp;
+      // TODO: if the scalers were constants, this would be so much shorter and
+      // faster
+      // // first: add scaled phi
+      complex_vector_add_scaled(serv_dphi_dn,
+                                serv_dphi_dn_imag,
+                                serv_phi_freesurface,
+                                serv_phi_freesurface_imag,
+                                freesurface_phi_scaler,
+                                freesurface_phi_scaler_imag,
+                                -1);
 
-      // these can be destructive
-      serv_phi_robin.scale(freesurface_scaler_imag);
-      serv_phi_robin_imag.scale(freesurface_scaler);
-      serv_dphi_dn_imag.add(-1, serv_phi_robin, -1, serv_phi_robin_imag);
+      // second: add scaled dphi_dx
+      freesurface_phi_to_dphi_dx(serv_phi_robin, serv_phi_freesurface);
+      freesurface_phi_to_dphi_dx(serv_phi_robin_imag,
+                                 serv_phi_freesurface_imag);
+      complex_vector_add_scaled(serv_dphi_dn,
+                                serv_dphi_dn_imag,
+                                serv_phi_robin,
+                                serv_phi_robin_imag,
+                                freesurface_dphi_dx_scaler,
+                                freesurface_dphi_dx_scaler_imag,
+                                -1);
+
+      // third: add scaled d2phi_dx2
+      freesurface_phi_to_dphi_dx(tmp, serv_phi_robin);
+      freesurface_phi_to_dphi_dx(tmp_imag, serv_phi_robin_imag);
+      complex_vector_add_scaled(serv_dphi_dn,
+                                serv_dphi_dn_imag,
+                                tmp,
+                                tmp_imag,
+                                freesurface_d2phi_dx2_scaler,
+                                freesurface_d2phi_dx2_scaler_imag,
+                                -1);
     }
 
   if (solution_method == "Direct")
@@ -2233,16 +2199,35 @@ BEMProblem<dim>::solve_system(TrilinosWrappers::MPI::Vector &      phi,
       if (serv_phi_robin.size() != serv_phi_freesurface.size())
         {
           serv_phi_robin.reinit(serv_phi_freesurface, false);
+          serv_phi_robin_imag.reinit(serv_phi_freesurface, false);
         }
-      freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
-      serv_phi_robin.scale(freesurface_scaler);
-      serv_phi_robin.sadd(-1, freesurface_rhs);
+      // freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
+      // serv_phi_robin.scale(freesurface_phi_scaler);
+      // serv_phi_robin.sadd(-1, freesurface_rhs);
+
+      serv_dphi_dn = freesurface_rhs;
+      serv_dphi_dn.scale(freesurface_nodes);
+
+      serv_phi_robin = serv_phi_freesurface;
+      serv_phi_robin.scale(freesurface_phi_scaler);
+      serv_dphi_dn -= serv_phi_robin;
+
+      freesurface_phi_to_dphi_dx(serv_phi_robin, serv_phi_freesurface);
+      serv_phi_robin_imag = serv_phi_robin;
+      serv_phi_robin_imag.scale(freesurface_nodes);
+      serv_phi_robin_imag.scale(freesurface_dphi_dx_scaler);
+      serv_dphi_dn -= serv_phi_robin_imag;
+
+      freesurface_phi_to_dphi_dx(serv_phi_robin_imag, serv_phi_robin);
+      serv_phi_robin_imag.scale(freesurface_nodes);
+      serv_phi_robin_imag.scale(freesurface_d2phi_dx2_scaler);
+      serv_dphi_dn -= serv_phi_robin_imag;
 
       for (auto i : this_cpu_set)
         {
           if (freesurface_nodes(i) == 1)
             {
-              dphi_dn(i) = serv_phi_robin(i);
+              dphi_dn(i) = serv_dphi_dn(i);
             }
         }
     }
@@ -2356,32 +2341,58 @@ BEMProblem<dim>::solve_system(TrilinosWrappers::MPI::Vector &      phi,
       serv_phi_freesurface.scale(freesurface_nodes);
       serv_phi_freesurface_imag.scale(freesurface_nodes);
 
+      static TrilinosWrappers::MPI::Vector tmp(this_cpu_set, mpi_communicator);
+      static TrilinosWrappers::MPI::Vector tmp_imag(this_cpu_set,
+                                                    mpi_communicator);
+      if (tmp.size() != serv_phi_freesurface.size())
+        {
+          tmp.reinit(this_cpu_set, mpi_communicator);
+          tmp_imag.reinit(this_cpu_set, mpi_communicator);
+        }
+
       // override serv_phi_robin, used as a tmp
       if (serv_phi_robin.size() != serv_phi_freesurface.size())
         {
           serv_phi_robin.reinit(serv_phi_freesurface, false);
-        }
-      freesurface_phi_to_d2phi_dx2(serv_phi_robin, serv_phi_freesurface);
-      if (serv_phi_robin_imag.size() != serv_phi_freesurface_imag.size())
-        {
           serv_phi_robin_imag.reinit(serv_phi_freesurface_imag, false);
         }
-      freesurface_phi_to_d2phi_dx2(serv_phi_robin_imag,
-                                   serv_phi_freesurface_imag);
-      // TODO: temporary, is there anything else to be recycled?
-      TrilinosWrappers::MPI::Vector tmp;
 
-      tmp = serv_phi_robin;
-      tmp.scale(freesurface_scaler);
-      serv_dphi_dn -= tmp;
-      tmp = serv_phi_robin_imag;
-      tmp.scale(freesurface_scaler_imag);
-      serv_dphi_dn += tmp;
+      serv_dphi_dn      = freesurface_rhs;
+      serv_dphi_dn_imag = freesurface_rhs_imag;
+      serv_dphi_dn.scale(freesurface_nodes);
+      serv_dphi_dn_imag.scale(freesurface_nodes);
 
-      // these can be destructive
-      serv_phi_robin.scale(freesurface_scaler_imag);
-      serv_phi_robin_imag.scale(freesurface_scaler);
-      serv_dphi_dn_imag.add(-1, serv_phi_robin, -1, serv_phi_robin_imag);
+      // // first: add scaled phi
+      complex_vector_add_scaled(serv_dphi_dn,
+                                serv_dphi_dn_imag,
+                                serv_phi_freesurface,
+                                serv_phi_freesurface_imag,
+                                freesurface_phi_scaler,
+                                freesurface_phi_scaler_imag,
+                                -1);
+
+      // second: add scaled dphi_dx
+      freesurface_phi_to_dphi_dx(serv_phi_robin, serv_phi_freesurface);
+      freesurface_phi_to_dphi_dx(serv_phi_robin_imag,
+                                 serv_phi_freesurface_imag);
+      complex_vector_add_scaled(serv_dphi_dn,
+                                serv_dphi_dn_imag,
+                                serv_phi_robin,
+                                serv_phi_robin_imag,
+                                freesurface_dphi_dx_scaler,
+                                freesurface_dphi_dx_scaler_imag,
+                                -1);
+
+      // third: add scaled d2phi_dx2
+      freesurface_phi_to_dphi_dx(tmp, serv_phi_robin);
+      freesurface_phi_to_dphi_dx(tmp_imag, serv_phi_robin_imag);
+      complex_vector_add_scaled(serv_dphi_dn,
+                                serv_dphi_dn_imag,
+                                tmp,
+                                tmp_imag,
+                                freesurface_d2phi_dx2_scaler,
+                                freesurface_d2phi_dx2_scaler_imag,
+                                -1);
 
       for (auto i : this_cpu_set)
         {

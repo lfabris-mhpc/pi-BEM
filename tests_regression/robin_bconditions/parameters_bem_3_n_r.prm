@@ -74,7 +74,7 @@ subsection BoundaryConditions<3>
     set Variable names      = x,y,z,t
   end 
 
-  subsection Robin coefficients 1 1 3d
+  subsection Robin coefficients 0 1 3d
     set Function constants  = 
     set Function expression = 1; -1; 0
     set Variable names      = x,y,z,t
