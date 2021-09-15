@@ -674,7 +674,7 @@ public:
   std::string   preconditioner_type;
   std::string   mapping_type;
   std::string   solution_method;
-  SolverControl solver_control;
+  SolverControl solver_control, solver_control_freesurface;
 
   // TODO AMG preconditioner
   TrilinosWrappers::PreconditionILU preconditioner, preconditioner_complex;

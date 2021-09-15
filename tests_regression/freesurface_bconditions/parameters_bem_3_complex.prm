@@ -35,7 +35,15 @@ subsection BEMProblem<3>
     set Log history   = false
     set Log result    = true
     set Max steps     = 1000
-    set Tolerance     = 1.e-6
+    set Tolerance     = 1.e-10
+  end
+
+  subsection Freesurface mass matrix solver
+    set Log frequency = 1
+    set Log history   = false
+    set Log result    = true
+    set Max steps     = 1000
+    set Tolerance     = 1.e-10
   end
 
 end
@@ -44,105 +52,76 @@ end
 subsection BoundaryConditions<3>
   set Output file name = result
   
-  #using w = 2
+  #using w0 = 2.5 : k0 = 0.637105
   #using U = 3
+  #using w = 4.41135
   #using g = 9.80665
 
-  subsection Potential 0 0 3d
-    set Function constants  = 
-    set Function expression = 0
-    set Variable names      = x,y,z,t
-  end
-
-  subsection Potential 0 1 3d
-    set Function constants  = 
-    set Function expression = 0
-    set Variable names      = x,y,z,t
-  end
-
+  #walls Re
   subsection Wind function 0 0 3d
     set Function constants  = 
     set Function expression = 0; 0; 0
     set Variable names      = x,y,z,t
   end
 
+  #hull Re
   subsection Wind function 0 1 3d
     set Function constants  = 
     set Function expression = -3; 0; 0
     set Variable names      = x,y,z,t
   end
   
+  #walls - Sommerfeld Re
   subsection Robin coefficients 0 0 3d
     set Function constants  = 
-    set Function expression = 0; 0; 0
+    set Function expression = 0; 1; 0
     set Variable names      = x,y,z,t
   end
 
-  subsection Robin coefficients 0 1 3d
-    set Function constants  = 
-    set Function expression = 0; 0; 0
-    set Variable names      = x,y,z,t
-  end
-
+  #freesurface Re
   # c0*phi + c1*dphi_dx + c2*d2phi_dx2 + c3*dphi_dn = c4
   # -w^2*phi + -2jU*dphi_dx + U^2*d2phi_dx2 + g*dphi_dn = c4
   subsection Free surface coefficients 0 0 3d
     set Function constants  = 
-    set Function expression = -4*4; 0; 3*3; -9.80665; 0
+    #set Function expression = -2.5*2.5; 0; 0; -9.80665; 0
+    #set Function expression = 0; 0; 3*3; -9.80665; 0
+    #set Function expression = -4.41135*4.41135; 0; 0; -9.80665; 0
+    set Function expression = -4.41135*4.41135; 0; 3*3; -9.80665; 0
     set Variable names      = x,y,z,t
   end
 
-  subsection Free surface coefficients 0 1 3d
-    set Function constants  = 
-    set Function expression = 0; 0; 0; 0; 0
-    set Variable names      = x,y,z,t
-  end
-
-subsection Potential 1 0 3d
-    set Function constants  = 
-    set Function expression = 0
-    set Variable names      = x,y,z,t
-  end
-
-  subsection Potential 1 1 3d
-    set Function constants  = 
-    set Function expression = 0
-    set Variable names      = x,y,z,t
-  end
-
+  #walls Im
   subsection Wind function 1 0 3d
     set Function constants  = 
     set Function expression = 0; 0; 0
     set Variable names      = x,y,z,t
   end
 
+  #hull Im
   subsection Wind function 1 1 3d
     set Function constants  = 
     set Function expression = -3; 0; 0
     set Variable names      = x,y,z,t
   end
   
+  #walls - Sommerfeld Im
   subsection Robin coefficients 1 0 3d
     set Function constants  = 
-    set Function expression = 0; 0; 0
+    set Function expression = 0.637105; 0; 0
     set Variable names      = x,y,z,t
   end
 
-  subsection Robin coefficients 1 1 3d
-    set Function constants  = 
-    set Function expression = 0; 0; 0
-    set Variable names      = x,y,z,t
-  end
-
+  #freesurface Im
   # c0*phi + c1*dphi_dx + c2*d2phi_dx2 + c3*dphi_dn = c4
   # -w^2*phi + -j2U*dphi_dx + U^2*d2phi_dx2 + g*dphi_dn = 0
   subsection Free surface coefficients 1 0 3d
     set Function constants  = 
-    set Function expression = 0; -2*3; 0; 0; 0
+    #set Function expression = 0; 0; 0; 0; 0
+    set Function expression = 0; 2*4.41135*3; 0; 0; 0
     set Variable names      = x,y,z,t
   end
 
-  subsection Free surface coefficients 0 1 3d
+  subsection Free surface coefficients 1 1 3d
     set Function constants  = 
     set Function expression = 0; 0; 0; 0; 0
     set Variable names      = x,y,z,t

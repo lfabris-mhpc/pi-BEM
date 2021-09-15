@@ -34,8 +34,8 @@ subsection BEMProblem<3>
     set Log frequency = 1
     set Log history   = false
     set Log result    = true
-    set Max steps     = 1000
-    set Tolerance     = 1.e-10
+    set Max steps     = 10000
+    set Tolerance     = 1.e-5
   end
 
   subsection Freesurface mass matrix solver
@@ -100,7 +100,7 @@ subsection BoundaryConditions<3>
   #hull Im
   subsection Wind function 1 1 3d
     set Function constants  = 
-    set Function expression = -3; 0; 0
+    set Function expression = 0; 0; -4.41135
     set Variable names      = x,y,z,t
   end
   
@@ -149,13 +149,13 @@ subsection ComputationalDomain<3>
 
   subsection Boundary Conditions ID Numbers
     set Dirichlet boundary ids   = 
-    set Neumann boundary ids     = 1,2,3,4,6
-    set Robin boundary ids       = 
+    set Neumann boundary ids     = 1,6
+    set Robin boundary ids       = 2,3,4
     set Free surface boundary ids       = 5
 
     # For each manifold, specify the boundary condition slot identifying the
     # function to be used
-    set Manifold to boundary slot map = 0,0, 1,0, 2,0, 3,0, 4,0, 5,0, 6,1
+    set Manifold to boundary slot map = 1,0, 2,0, 3,0, 4,0, 5,0, 6,1
     set Flat boundaries = 5
   end
 

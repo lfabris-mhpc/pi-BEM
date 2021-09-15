@@ -478,6 +478,10 @@ BEMProblem<dim>::declare_parameters(ParameterHandler &prm)
   SolverControl::declare_parameters(prm);
   prm.leave_subsection();
 
+  prm.enter_subsection("Freesurface mass matrix solver");
+  SolverControl::declare_parameters(prm);
+  prm.leave_subsection();
+
   prm.declare_entry("Preconditioner", "ILU", Patterns::Selection("ILU|AMG"));
 
   prm.declare_entry("Solution method",
@@ -510,6 +514,10 @@ BEMProblem<dim>::parse_parameters(ParameterHandler &prm)
 {
   prm.enter_subsection("Solver");
   solver_control.parse_parameters(prm);
+  prm.leave_subsection();
+
+  prm.enter_subsection("Freesurface mass matrix solver");
+  solver_control_freesurface.parse_parameters(prm);
   prm.leave_subsection();
 
   preconditioner_type = prm.get("Preconditioner");
@@ -1619,7 +1627,7 @@ BEMProblem<dim>::freesurface_phi_to_dphi_dx(
   //       << tmp.mean_value() * nfreesurface_dofs << std::endl;
 
   // dphi_dn_freesurface = freesurface_mass_matrix^-1 * tmp
-  SolverControl                              controller0(solver_control);
+  SolverControl controller0(solver_control_freesurface);
   SolverGMRES<TrilinosWrappers::MPI::Vector> solver0(
     controller0,
     SolverGMRES<TrilinosWrappers::MPI::Vector>::AdditionalData(1000));
@@ -2772,12 +2780,19 @@ BEMProblem<dim>::assemble_preconditioner()
                   // Nodo di Neumann - or Robin
                   band_system.add(i, j, neumann_matrix(i, j));
 
-                  // TODO: account for Robin node
                   if (robin_nodes(j) == 1)
                     {
                       band_system.add(i,
                                       j,
                                       dirichlet_matrix(i, j) * robin_scaler(j));
+                    }
+                  else if (freesurface_nodes(j) == 1)
+                    {
+                      // TODO: ignoring x-derivatives
+                      band_system.add(i,
+                                      j,
+                                      dirichlet_matrix(i, j) *
+                                        freesurface_phi_scaler(j));
                     }
 
                   if (i == j)
@@ -2872,9 +2887,6 @@ BEMProblem<dim>::assemble_preconditioner_complex()
 
                   if (robin_nodes(j) == 1)
                     {
-                      // scale the row from D, using the robin matrix
-                      // diagonal
-                      // for now, ignore the pairing parts
                       band_system_complex.add(
                         i, j, dirichlet_matrix(i, j) * robin_scaler(j));
                       band_system_complex.add(i + this_cpu_set.size(),
@@ -2897,6 +2909,36 @@ BEMProblem<dim>::assemble_preconditioner_complex()
                                                   j,
                                                   dirichlet_matrix(i, j) *
                                                     robin_scaler_imag(j));
+                        }
+                    }
+                  else if (freesurface_nodes(j) == 1)
+                    {
+                      band_system_complex.add(i,
+                                              j,
+                                              dirichlet_matrix(i, j) *
+                                                freesurface_phi_scaler(j));
+                      band_system_complex.add(i + this_cpu_set.size(),
+                                              j + this_cpu_set.size(),
+                                              dirichlet_matrix(i, j) *
+                                                freesurface_phi_scaler(j));
+
+                      // check for pairing elements
+                      if ((freesurface_nodes(i) == 1) &&
+                          j + this_cpu_set.size() < i + preconditioner_band / 2)
+                        {
+                          // the pairing element of the current real
+                          // variable and its imag version is available in
+                          // the band
+                          band_system_complex.add(i,
+                                                  j + this_cpu_set.size(),
+                                                  -dirichlet_matrix(i, j) *
+                                                    freesurface_phi_scaler_imag(
+                                                      j));
+                          band_system_complex.add(i + this_cpu_set.size(),
+                                                  j,
+                                                  dirichlet_matrix(i, j) *
+                                                    freesurface_phi_scaler_imag(
+                                                      j));
                         }
                     }
 
