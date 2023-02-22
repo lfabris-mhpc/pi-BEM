@@ -1,3 +1,5 @@
+#include "../include/bem_problem.h"
+
 #include <deal.II/lac/arpack_solver.h>
 
 #include <deal.II/numerics/error_estimator.h>
@@ -5,7 +7,6 @@
 #include <iomanip>
 #include <iostream>
 
-#include "../include/bem_problem.h"
 #include "../include/constrained_matrix_complex.h"
 #include "../include/laplace_kernel.h"
 #include "Teuchos_TimeMonitor.hpp"
@@ -13,24 +14,6 @@
 using Teuchos::RCP;
 using Teuchos::Time;
 using Teuchos::TimeMonitor;
-
-#define ENTRY EntryRaiiObject obj##LINE(__FUNCTION__);
-
-struct EntryRaiiObject
-{
-  EntryRaiiObject(const char *f)
-    : f_(f)
-  {
-    printf("Entered into %s\n", f_);
-  }
-
-  ~EntryRaiiObject()
-  {
-    printf("Exited from %s\n", f_);
-  }
-
-  const char *f_;
-};
 
 RCP<Time> ConstraintsTime =
   Teuchos::TimeMonitor::getNewTimer("Compute Constraints Time");
@@ -277,7 +260,7 @@ BEMProblem<dim>::reinit()
                                            preconditioner_band);
   is_preconditioner_initialized = false;
 
-  IndexSet this_cpu_set_complex;
+  IndexSet this_cpu_set_complex(2 * this_cpu_set.size());
   this_cpu_set_complex.add_indices(this_cpu_set);
   this_cpu_set_complex.add_indices(this_cpu_set, this_cpu_set.size());
   this_cpu_set_complex.compress();
@@ -630,16 +613,6 @@ BEMProblem<dim>::compute_double_nodes_set()
               double_nodes_set[j].insert(i);
             }
         }
-      /*
-      for (auto j : edge_set)
-        {
-          if (support_points[i].distance_square(support_points[j]) <
-              (tol * tol))
-            {
-              double_nodes_set[i].insert(j);
-            }
-        }
-      */
     }
 }
 
@@ -683,7 +656,7 @@ BEMProblem<dim>::assemble_system()
   pcout << "DoFs per cell: " << fe->dofs_per_cell << " " << std::endl;
 
   // prepare entire rows
-  auto                len = fe->dofs_per_cell; // dh.n_dofs();
+  auto                len = fe->dofs_per_cell;
   std::vector<double> local_neumann_matrix_row_i(len);
   std::vector<double> local_dirichlet_matrix_row_i(len);
 
@@ -741,7 +714,6 @@ BEMProblem<dim>::assemble_system()
             {
               for (unsigned int q = 0; q < n_q_points; ++q)
                 {
-                  // const Tensor<1, dim> R = q_points[q] - support_points[i];
                   LaplaceKernel::kernels(q_points[q] - support_points[i], D, s);
 
                   for (unsigned int j = 0; j < fe->dofs_per_cell; ++j)
@@ -779,8 +751,6 @@ BEMProblem<dim>::assemble_system()
 
               for (unsigned int q = 0; q < singular_quadrature->size(); ++q)
                 {
-                  // const Tensor<1, dim> R = singular_q_points[q] -
-                  // support_points[i];
                   LaplaceKernel::kernels(
                     singular_q_points[q] - support_points[i], D, s);
 
@@ -834,8 +804,6 @@ BEMProblem<dim>::assemble_system_tbb()
       : fe_v(mapping, fe, quadrature, update_flags)
       , cell_dofs(fe.dofs_per_cell)
       , row(0)
-      // , neumann_row_entries(fe.dofs_per_cell)
-      // , dirichlet_row_entries(fe.dofs_per_cell)
       , neumann_row_entries(n_dofs)
       , dirichlet_row_entries(n_dofs)
     {}

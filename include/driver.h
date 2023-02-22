@@ -23,33 +23,6 @@
 #include <deal.II/base/smartpointer.h>
 #include <deal.II/base/utilities.h>
 
-#include <deal.II/lac/full_matrix.h>
-#include <deal.II/lac/precondition.h>
-#include <deal.II/lac/solver_control.h>
-#include <deal.II/lac/solver_gmres.h>
-#include <deal.II/lac/sparse_matrix.h>
-#include <deal.II/lac/vector.h>
-//
-//#include <deal.II/lac/trilinos_vector.h>
-//#include <deal.II/lac/trilinos_vector.h>
-//#include <deal.II/lac/trilinos_sparse_matrix.h>
-//#include <deal.II/lac/trilinos_solver.h>
-//#include <deal.II/lac/trilinos_precondition.h>
-//
-//#include <deal.II/lac/petsc_vector.h>
-//#include <deal.II/lac/petsc_parallel_vector.h>
-//#include <deal.II/lac/petsc_parallel_sparse_matrix.h>
-//#include <deal.II/lac/petsc_solver.h>
-//#include <deal.II/lac/petsc_precondition.h>
-
-#include <deal.II/grid/grid_generator.h>
-#include <deal.II/grid/grid_in.h>
-#include <deal.II/grid/grid_out.h>
-#include <deal.II/grid/tria.h>
-#include <deal.II/grid/tria_accessor.h>
-#include <deal.II/grid/tria_iterator.h>
-// #include<deal.II/grid/tria_boundary_lib.h>
-
 #include <deal.II/dofs/dof_accessor.h>
 #include <deal.II/dofs/dof_handler.h>
 #include <deal.II/dofs/dof_renumbering.h>
@@ -61,12 +34,24 @@
 #include <deal.II/fe/mapping_q1.h>
 #include <deal.II/fe/mapping_q1_eulerian.h>
 
+#include <deal.II/grid/grid_generator.h>
+#include <deal.II/grid/grid_in.h>
+#include <deal.II/grid/grid_out.h>
+#include <deal.II/grid/tria.h>
+#include <deal.II/grid/tria_accessor.h>
+#include <deal.II/grid/tria_iterator.h>
+
+#include <deal.II/lac/full_matrix.h>
+#include <deal.II/lac/precondition.h>
+#include <deal.II/lac/solver_control.h>
+#include <deal.II/lac/solver_gmres.h>
+#include <deal.II/lac/sparse_matrix.h>
+#include <deal.II/lac/vector.h>
+
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/solution_transfer.h>
 #include <deal.II/numerics/vector_tools.h>
 
-// And here are a few C++ standard header
-// files that we will need:
 #include <deal2lkit/parameter_acceptor.h>
 
 #include <cmath>
@@ -80,9 +65,6 @@
 #include "boundary_conditions.h"
 #include "computational_domain.h"
 using namespace dealii;
-
-// using namespace TrilinosWrappers::MPI::Vector;
-// using namespace TrilinosWrappers::MPI::SparseMatrix;
 
 /**
  * This class is in charge of organising the overall BEM simulation. It has
